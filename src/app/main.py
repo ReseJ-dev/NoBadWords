@@ -16,6 +16,7 @@ LOGGER = logging.getLogger(__name__)
 def create_application(argv: Sequence[str] | None = None) -> QApplication:
     """Create and configure the Qt application."""
     application = QApplication(list(argv) if argv is not None else sys.argv)
+    application.setOrganizationName("VideoProfanityCensor")
     application.setApplicationName("Video Profanity Censor")
     application.setStyleSheet(APPLICATION_STYLESHEET)
     return application
@@ -33,4 +34,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

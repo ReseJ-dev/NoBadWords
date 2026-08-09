@@ -1,7 +1,27 @@
 """Shared data models for the desktop application."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+Language = Literal["Russian", "English", "Auto"]
+WhisperModel = Literal["tiny", "base", "small", "medium", "large-v3"]
+Device = Literal["Auto", "CPU", "CUDA"]
+CensorshipMode = Literal["Beep", "Mute", "Cut"]
+
+
+@dataclass(frozen=True, slots=True)
+class ScanSettings:
+    """User-configurable speech scan and censorship preferences."""
+
+    language: Language = "Russian"
+    whisper_model: WhisperModel = "base"
+    device: Device = "Auto"
+    censorship_mode: CensorshipMode = "Beep"
+    confidence: float = 0.65
+    pre_padding_ms: int = 120
+    post_padding_ms: int = 180
+    beep_frequency_hz: int = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +45,7 @@ class ApplicationState:
 
     selected_video: VideoFile | None = None
     media_info: "MediaInfo | None" = None
+    scan_settings: ScanSettings = field(default_factory=ScanSettings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,4 +60,3 @@ class MediaInfo:
     audio_codec: str | None
     audio_stream_count: int
     sample_rate: int | None
-

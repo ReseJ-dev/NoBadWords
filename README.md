@@ -21,5 +21,9 @@ python -m app.main
 Use **Choose Video** or drag a supported MP4, MOV, MKV, AVI, WEBM, or M4V file
 onto the video input area. Selecting a video displays its path and size but does
 not start a scan. Media details are inspected in the background with FFprobe.
-Scan settings, detected profanity, and export controls remain placeholders for
-later steps.
+Detected profanity and export controls remain placeholders for later steps.
+
+Scan and censorship preferences are saved through the operating system's Qt
+settings store and restored the next time the application starts. The Scan
+Video button is currently present for workflow setup only; transcription is not
+implemented yet.

@@ -1,7 +1,7 @@
 """Main application window."""
 
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt
 
@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.config import SettingsStore
 from app.core.media_info import inspect_media
-from app.core.models import ApplicationState, MediaInfo, VideoFile
+from app.core.models import ApplicationState, MediaInfo, ScanSettings, VideoFile
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
+from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
 from app.gui.workers import MediaInspectionWorker
 
@@ -29,10 +31,13 @@ class MainWindow(QMainWindow):
     """Top-level window for the video profanity censor workflow."""
 
     def __init__(
-        self, media_inspector: Callable[[Path], MediaInfo] = inspect_media
+        self,
+        media_inspector: Callable[[Path], MediaInfo] = inspect_media,
+        settings_store: SettingsStore | None = None,
     ) -> None:
         super().__init__()
-        self.state = ApplicationState()
+        self._settings_store = settings_store or SettingsStore()
+        self.state = ApplicationState(scan_settings=self._settings_store.load())
         self._media_inspector = media_inspector
         self._inspection_workers: dict[QThread, MediaInspectionWorker] = {}
         self.setWindowTitle("Video Profanity Censor")
@@ -62,7 +67,7 @@ class MainWindow(QMainWindow):
         sections = QGridLayout()
         sections.setSpacing(16)
         sections.addWidget(self._create_video_input_section(), 0, 0)
-        sections.addWidget(self._create_section("scanSettings", "Scan settings"), 0, 1)
+        sections.addWidget(self._create_scan_settings_section(), 0, 1)
         sections.addWidget(
             self._create_section("detectedProfanity", "Detected profanity"), 1, 0
         )
@@ -74,6 +79,17 @@ class MainWindow(QMainWindow):
         layout.addLayout(sections, 1)
 
         return central_widget
+
+    def _create_scan_settings_section(self) -> QFrame:
+        section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
+        self.scan_settings_widget = ScanSettingsWidget(self.state.scan_settings)
+        self.scan_settings_widget.settings_changed.connect(self._on_scan_settings_changed)
+        section.layout().addWidget(self.scan_settings_widget)
+        return section
+
+    def _on_scan_settings_changed(self, settings: ScanSettings) -> None:
+        self.state.scan_settings = settings
+        self._settings_store.save(settings)
 
     def _create_video_input_section(self) -> QFrame:
         section = self._create_section("videoInput", "Video input", add_placeholder=False)
