@@ -1,8 +1,9 @@
 """Main application window."""
 
 from pathlib import Path
+from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt
 
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -17,17 +18,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.models import ApplicationState, VideoFile
+from app.core.media_info import inspect_media
+from app.core.models import ApplicationState, MediaInfo, VideoFile
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
 from app.gui.video_drop_area import VideoDropArea
+from app.gui.workers import MediaInspectionWorker
 
 
 class MainWindow(QMainWindow):
     """Top-level window for the video profanity censor workflow."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, media_inspector: Callable[[Path], MediaInfo] = inspect_media
+    ) -> None:
         super().__init__()
         self.state = ApplicationState()
+        self._media_inspector = media_inspector
+        self._inspection_workers: dict[QThread, MediaInspectionWorker] = {}
         self.setWindowTitle("Video Profanity Censor")
         self.setMinimumSize(960, 640)
         self.setCentralWidget(self._create_central_widget())
@@ -93,6 +100,12 @@ class MainWindow(QMainWindow):
         self.video_size_label.setObjectName("videoSize")
         self.video_duration_label = QLabel("Detected duration: Not scanned")
         self.video_duration_label.setObjectName("videoDuration")
+        self.video_resolution_label = QLabel("Resolution: Not inspected")
+        self.video_resolution_label.setObjectName("videoResolution")
+        self.video_codec_label = QLabel("Video codec: Not inspected")
+        self.video_codec_label.setObjectName("videoCodec")
+        self.audio_codec_label = QLabel("Audio codec: Not inspected")
+        self.audio_codec_label.setObjectName("audioCodec")
         self.video_status_label = QLabel("Input status: Waiting for a video")
         self.video_status_label.setObjectName("videoStatus")
         for label in (
@@ -100,6 +113,9 @@ class MainWindow(QMainWindow):
             self.video_path_label,
             self.video_size_label,
             self.video_duration_label,
+            self.video_resolution_label,
+            self.video_codec_label,
+            self.audio_codec_label,
             self.video_status_label,
         ):
             layout.addWidget(label)
@@ -133,13 +149,67 @@ class MainWindow(QMainWindow):
 
         video = VideoFile.from_path(path)
         self.state.selected_video = video
+        self.state.media_info = None
         self.video_filename_label.setText(f"Filename: {video.path.name}")
         self.video_path_label.setText(f"Full path: {video.path}")
         self.video_size_label.setText(f"File size: {format_file_size(video.size_bytes)}")
-        self.video_duration_label.setText("Detected duration: Not scanned")
-        self.video_status_label.setText("Input status: Ready to scan")
-        self.statusBar().showMessage(f"Selected {video.path.name}")
+        self.video_duration_label.setText("Duration: Inspecting...")
+        self.video_resolution_label.setText("Resolution: Inspecting...")
+        self.video_codec_label.setText("Video codec: Inspecting...")
+        self.audio_codec_label.setText("Audio codec: Inspecting...")
+        self.video_status_label.setText("Input status: Inspecting media")
+        self.statusBar().showMessage(f"Inspecting {video.path.name}")
+        self._start_media_inspection(video.path)
         return True
+
+    def _start_media_inspection(self, path: Path) -> None:
+        thread = QThread(self)
+        worker = MediaInspectionWorker(path, self._media_inspector)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._on_media_inspected)
+        worker.failed.connect(self._on_media_inspection_failed)
+        worker.completed.connect(thread.quit)
+        worker.completed.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._release_inspection_thread(thread))
+        self._inspection_workers[thread] = worker
+        thread.start()
+
+    def _release_inspection_thread(self, thread: QThread) -> None:
+        self._inspection_workers.pop(thread, None)
+        thread.deleteLater()
+
+    def _on_media_inspected(self, path: Path, media_info: MediaInfo) -> None:
+        if self.state.selected_video is None or self.state.selected_video.path != path:
+            return
+        self.state.media_info = media_info
+        self.video_duration_label.setText(f"Duration: {self._format_duration(media_info.duration)}")
+        self.video_resolution_label.setText(
+            f"Resolution: {media_info.width} x {media_info.height}"
+        )
+        self.video_codec_label.setText(f"Video codec: {media_info.video_codec}")
+        audio_codec = media_info.audio_codec or "No audio"
+        self.audio_codec_label.setText(f"Audio codec: {audio_codec}")
+        self.video_status_label.setText("Input status: Ready to scan")
+        self.statusBar().showMessage(f"Ready to scan {path.name}")
+
+    def _on_media_inspection_failed(self, path: Path, message: str) -> None:
+        if self.state.selected_video is None or self.state.selected_video.path != path:
+            return
+        self.video_duration_label.setText("Duration: Unavailable")
+        self.video_resolution_label.setText("Resolution: Unavailable")
+        self.video_codec_label.setText("Video codec: Unavailable")
+        self.audio_codec_label.setText("Audio codec: Unavailable")
+        self.video_status_label.setText("Input status: Media inspection failed")
+        self.statusBar().showMessage("Media inspection failed")
+        QMessageBox.warning(self, "Media inspection unavailable", message)
+
+    @staticmethod
+    def _format_duration(duration: float) -> str:
+        total_seconds = max(0, round(duration))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     def _show_unsupported_file_message(self, path: Path) -> None:
         supported = ", ".join(

@@ -7,6 +7,7 @@ transcription and media processing will be added in later commits.
 ## Requirements
 
 - Python 3.12 or newer
+- FFmpeg and FFprobe available on `PATH`
 
 ## Development setup
 
@@ -19,5 +20,6 @@ python -m app.main
 
 Use **Choose Video** or drag a supported MP4, MOV, MKV, AVI, WEBM, or M4V file
 onto the video input area. Selecting a video displays its path and size but does
-not start a scan. Scan settings, detected profanity, and export controls remain
-placeholders for later steps.
+not start a scan. Media details are inspected in the background with FFprobe.
+Scan settings, detected profanity, and export controls remain placeholders for
+later steps.

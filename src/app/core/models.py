@@ -24,4 +24,19 @@ class ApplicationState:
     """Mutable state shared by the desktop workflow."""
 
     selected_video: VideoFile | None = None
+    media_info: "MediaInfo | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class MediaInfo:
+    """Technical metadata reported by FFprobe for a media file."""
+
+    duration: float
+    width: int
+    height: int
+    frame_rate: float
+    video_codec: str
+    audio_codec: str | None
+    audio_stream_count: int
+    sample_rate: int | None
 

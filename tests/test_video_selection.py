@@ -20,11 +20,14 @@ def test_unsupported_video_extensions(filename: str) -> None:
     assert not is_supported_video(filename)
 
 
-def test_selecting_video_updates_application_state(tmp_path: Path) -> None:
+def test_selecting_video_updates_application_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     application = QApplication.instance() or QApplication([])
     video_path = tmp_path / "sample video.mp4"
     video_path.write_bytes(b"video data")
     window = MainWindow()
+    monkeypatch.setattr(window, "_start_media_inspection", lambda path: None)
 
     selected = window.select_video(video_path)
 
@@ -34,7 +37,7 @@ def test_selecting_video_updates_application_state(tmp_path: Path) -> None:
     assert window.state.selected_video.size_bytes == len(b"video data")
     assert window.state.selected_video.duration_seconds is None
     assert "sample video.mp4" in window.video_filename_label.text()
-    assert "Ready to scan" in window.video_status_label.text()
+    assert "Inspecting media" in window.video_status_label.text()
 
     window.close()
     application.processEvents()
