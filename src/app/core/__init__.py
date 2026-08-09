@@ -1,0 +1,2 @@
+"""Backend-independent application foundations."""
+

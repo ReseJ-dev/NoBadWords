@@ -1,9 +1,8 @@
 # NoBadWords
 
-NoBadWords is a Python application for automatically censoring profanity in
-video speech. This initial version provides the project foundation and a
-minimal command-line interface; transcription and media processing will be
-added in later commits.
+NoBadWords is a desktop application for automatically censoring profanity in
+video speech. The current version provides the desktop interface foundation;
+transcription and media processing will be added in later commits.
 
 ## Requirements
 
@@ -15,6 +14,8 @@ added in later commits.
 python -m venv .venv
 python -m pip install -e ".[dev]"
 pytest
-python -m censor --help
+python -m app.main
 ```
 
+The desktop window contains placeholders for video input, scan settings,
+detected profanity, and export controls.
