@@ -17,5 +17,7 @@ pytest
 python -m app.main
 ```
 
-The desktop window contains placeholders for video input, scan settings,
-detected profanity, and export controls.
+Use **Choose Video** or drag a supported MP4, MOV, MKV, AVI, WEBM, or M4V file
+onto the video input area. Selecting a video displays its path and size but does
+not start a scan. Scan settings, detected profanity, and export controls remain
+placeholders for later steps.
