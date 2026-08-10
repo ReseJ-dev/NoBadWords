@@ -77,6 +77,16 @@ class ExportRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class TimelineSegment:
+    """A retained source segment and its position in the cut output."""
+
+    source_start: float
+    source_end: float
+    output_start: float
+    output_end: float
+
+
+@dataclass(frozen=True, slots=True)
 class VideoFile:
     """A video selected in the desktop application."""
 

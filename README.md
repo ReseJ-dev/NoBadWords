@@ -28,7 +28,7 @@ remain a placeholder for later steps. Enabled detections are converted into
 bounded, padded, merged censorship intervals, and their effective total duration
 is shown in the interface.
 
-Mute and Beep modes can export an MP4 cleaned copy through FFmpeg. Rendering
+Mute, Beep, and Cut modes can export an MP4 cleaned copy through FFmpeg. Rendering
 runs in a background worker, preserves the original video stream when possible,
 and reports the current export stage and output path in the interface.
 

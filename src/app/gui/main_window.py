@@ -353,14 +353,12 @@ class MainWindow(QMainWindow):
             and self.state.media_info is not None
             and self.state.media_info.audio_stream_count > 0
             and bool(self.state.censor_intervals)
-            and mode in ("Mute", "Beep")
+            and mode in ("Mute", "Beep", "Cut")
             and self._transcription_thread is None
             and self._export_thread is None
         )
         self.export_controls.export_button.setEnabled(ready)
-        if mode == "Cut":
-            status = "Export status: Cut mode is not available yet"
-        elif (
+        if (
             self.state.media_info is not None
             and self.state.media_info.audio_stream_count == 0
         ):
