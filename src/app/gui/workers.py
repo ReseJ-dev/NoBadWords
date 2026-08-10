@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from app.core.models import MediaInfo, ScanResult, ScanSettings
+from app.core.censor_engine import VideoExporter
+from app.core.models import ExportRequest, MediaInfo, ScanResult, ScanSettings
 from app.core.profanity_detector import ProfanityScanner
 from app.core.transcription import Transcriber
 
@@ -72,5 +73,37 @@ class TranscriptionWorker(QObject):
             self.failed.emit(str(error))
         else:
             self.succeeded.emit(ScanResult(words=words, matches=matches))
+        finally:
+            self.completed.emit()
+
+
+class ExportWorker(QObject):
+    """Render a censored video without blocking the GUI thread."""
+
+    status_changed = Signal(str)
+    succeeded = Signal(Path)
+    failed = Signal(str)
+    completed = Signal()
+
+    def __init__(
+        self,
+        request: ExportRequest,
+        exporter: VideoExporter,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._request = request
+        self._exporter = exporter
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            output_path = self._exporter.export(
+                self._request, self.status_changed.emit
+            )
+        except Exception as error:
+            self.failed.emit(str(error))
+        else:
+            self.succeeded.emit(output_path)
         finally:
             self.completed.emit()

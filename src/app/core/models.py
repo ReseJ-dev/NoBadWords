@@ -65,6 +65,18 @@ class CensorInterval:
 
 
 @dataclass(frozen=True, slots=True)
+class ExportRequest:
+    """All validated inputs required to render a censored video."""
+
+    input_path: Path
+    output_path: Path
+    mode: CensorshipMode
+    intervals: tuple[CensorInterval, ...]
+    media_duration: float
+    beep_frequency_hz: int = 1000
+
+
+@dataclass(frozen=True, slots=True)
 class VideoFile:
     """A video selected in the desktop application."""
 
@@ -89,6 +101,7 @@ class ApplicationState:
     word_timestamps: list[WordTimestamp] = field(default_factory=list)
     profanity_matches: list[ProfanityMatch] = field(default_factory=list)
     censor_intervals: list[CensorInterval] = field(default_factory=list)
+    last_export_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)

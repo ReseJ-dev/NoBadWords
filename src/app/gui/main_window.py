@@ -18,11 +18,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.censor_engine import CensorEngine, VideoExporter
 from app.core.config import SettingsStore
 from app.core.intervals import build_censor_intervals, total_censorship_duration
 from app.core.media_info import inspect_media
 from app.core.models import (
     ApplicationState,
+    ExportRequest,
     MediaInfo,
     ProfanityMatch,
     ScanResult,
@@ -32,10 +34,11 @@ from app.core.models import (
 from app.core.profanity_detector import ProfanityDetector, ProfanityScanner
 from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
+from app.gui.export_controls import ExportControlsWidget
 from app.gui.review_table import ProfanityReviewWidget
 from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
-from app.gui.workers import MediaInspectionWorker, TranscriptionWorker
+from app.gui.workers import ExportWorker, MediaInspectionWorker, TranscriptionWorker
 
 
 class MainWindow(QMainWindow):
@@ -47,6 +50,7 @@ class MainWindow(QMainWindow):
         settings_store: SettingsStore | None = None,
         transcriber: Transcriber | None = None,
         profanity_scanner: ProfanityScanner | None = None,
+        exporter: VideoExporter | None = None,
     ) -> None:
         super().__init__()
         self._settings_store = settings_store or SettingsStore()
@@ -58,9 +62,12 @@ class MainWindow(QMainWindow):
         self._profanity_scanner = (
             profanity_scanner if profanity_scanner is not None else ProfanityDetector()
         )
+        self._exporter = exporter if exporter is not None else CensorEngine()
         self._inspection_workers: dict[QThread, MediaInspectionWorker] = {}
         self._transcription_thread: QThread | None = None
         self._transcription_worker: TranscriptionWorker | None = None
+        self._export_thread: QThread | None = None
+        self._export_worker: ExportWorker | None = None
         self.setWindowTitle("Video Profanity Censor")
         self.setMinimumSize(960, 640)
         self.setCentralWidget(self._create_central_widget())
@@ -90,7 +97,7 @@ class MainWindow(QMainWindow):
         sections.addWidget(self._create_video_input_section(), 0, 0)
         sections.addWidget(self._create_scan_settings_section(), 0, 1)
         sections.addWidget(self._create_results_section(), 1, 0)
-        sections.addWidget(self._create_section("exportControls", "Export controls"), 1, 1)
+        sections.addWidget(self._create_export_section(), 1, 1)
         sections.setRowStretch(0, 1)
         sections.setRowStretch(1, 1)
         sections.setColumnStretch(0, 1)
@@ -98,6 +105,15 @@ class MainWindow(QMainWindow):
         layout.addLayout(sections, 1)
 
         return central_widget
+
+    def _create_export_section(self) -> QFrame:
+        section = self._create_section(
+            "exportControls", "Export controls", add_placeholder=False
+        )
+        self.export_controls = ExportControlsWidget()
+        self.export_controls.export_button.clicked.connect(self._choose_export_path)
+        section.layout().addWidget(self.export_controls)
+        return section
 
     def _create_results_section(self) -> QFrame:
         section = self._create_section(
@@ -212,7 +228,12 @@ class MainWindow(QMainWindow):
         self.state.word_timestamps.clear()
         self.state.profanity_matches.clear()
         self.state.censor_intervals.clear()
+        self.state.last_export_path = None
+        self.export_controls.status_label.setText(
+            "Export status: Waiting for enabled detections"
+        )
         self.review_widget.set_matches([])
+        self.export_controls.output_label.setText("Output: Not exported")
         self.video_filename_label.setText(f"Filename: {video.path.name}")
         self.video_path_label.setText(f"Full path: {video.path}")
         self.video_size_label.setText(f"File size: {format_file_size(video.size_bytes)}")
@@ -308,6 +329,7 @@ class MainWindow(QMainWindow):
             self.effective_duration_label.setText(
                 "Effective censorship: Media duration unavailable"
             )
+            self._update_export_availability()
             return
         settings = self.state.scan_settings
         self.state.censor_intervals = build_censor_intervals(
@@ -320,6 +342,104 @@ class MainWindow(QMainWindow):
         self.effective_duration_label.setText(
             f"Effective censorship: {duration:.3f} s"
         )
+        self._update_export_availability()
+
+    def _update_export_availability(self) -> None:
+        if not hasattr(self, "export_controls"):
+            return
+        mode = self.state.scan_settings.censorship_mode
+        ready = (
+            self.state.selected_video is not None
+            and self.state.media_info is not None
+            and self.state.media_info.audio_stream_count > 0
+            and bool(self.state.censor_intervals)
+            and mode in ("Mute", "Beep")
+            and self._transcription_thread is None
+            and self._export_thread is None
+        )
+        self.export_controls.export_button.setEnabled(ready)
+        if mode == "Cut":
+            status = "Export status: Cut mode is not available yet"
+        elif (
+            self.state.media_info is not None
+            and self.state.media_info.audio_stream_count == 0
+        ):
+            status = "Export status: The source video has no audio stream"
+        elif not self.state.censor_intervals:
+            status = "Export status: Waiting for enabled detections"
+        else:
+            status = "Export status: Ready"
+        current_status = self.export_controls.status_label.text()
+        if self._export_thread is None and not current_status.endswith(
+            ("Complete", "Failed")
+        ):
+            self.export_controls.status_label.setText(status)
+
+    def _choose_export_path(self) -> None:
+        if self.state.selected_video is None or self.state.media_info is None:
+            return
+        suggested = self.state.selected_video.path.with_name(
+            f"{self.state.selected_video.path.stem}_censored.mp4"
+        )
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Cleaned Video",
+            str(suggested),
+            "MP4 video (*.mp4)",
+        )
+        if not selected_path:
+            return
+        request = ExportRequest(
+            input_path=self.state.selected_video.path,
+            output_path=Path(selected_path),
+            mode=self.state.scan_settings.censorship_mode,
+            intervals=tuple(self.state.censor_intervals),
+            media_duration=self.state.media_info.duration,
+            beep_frequency_hz=self.state.scan_settings.beep_frequency_hz,
+        )
+        self._start_export(request)
+
+    def _start_export(self, request: ExportRequest) -> None:
+        if self._export_thread is not None:
+            return
+        self._set_scan_controls_enabled(False)
+        self.export_controls.status_label.setText("Export status: Preparing")
+        thread = QThread(self)
+        worker = ExportWorker(request, self._exporter)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.status_changed.connect(self._on_export_status_changed)
+        worker.succeeded.connect(self._on_export_succeeded)
+        worker.failed.connect(self._on_export_failed)
+        worker.completed.connect(thread.quit)
+        worker.completed.connect(worker.deleteLater)
+        thread.finished.connect(self._release_export_thread)
+        self._export_thread = thread
+        self._export_worker = worker
+        thread.start()
+
+    def _on_export_status_changed(self, status: str) -> None:
+        self.export_controls.status_label.setText(f"Export status: {status}")
+        self.statusBar().showMessage(status)
+
+    def _on_export_succeeded(self, output_path: Path) -> None:
+        self.state.last_export_path = output_path
+        self.export_controls.status_label.setText("Export status: Complete")
+        self.export_controls.output_label.setText(f"Output: {output_path}")
+        self.statusBar().showMessage(f"Export complete: {output_path.name}")
+
+    def _on_export_failed(self, message: str) -> None:
+        self.export_controls.status_label.setText("Export status: Failed")
+        self.statusBar().showMessage("Export failed")
+        QMessageBox.warning(self, "Could not export video", message)
+
+    def _release_export_thread(self) -> None:
+        thread = self._export_thread
+        self._export_thread = None
+        self._export_worker = None
+        self._set_scan_controls_enabled(True)
+        if thread is not None:
+            thread.deleteLater()
 
     def _on_transcription_failed(self, message: str) -> None:
         self.statusBar().showMessage("Transcription failed")
@@ -337,6 +457,10 @@ class MainWindow(QMainWindow):
         self.video_drop_area.setEnabled(enabled)
         self.choose_video_button.setEnabled(enabled)
         self.scan_settings_widget.setEnabled(enabled)
+        self.review_widget.setEnabled(enabled)
+        self.export_controls.setEnabled(enabled)
+        if enabled:
+            self._update_export_availability()
 
     def _on_media_inspection_failed(self, path: Path, message: str) -> None:
         if self.state.selected_video is None or self.state.selected_video.path != path:
