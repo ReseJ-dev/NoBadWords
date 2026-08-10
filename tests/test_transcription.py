@@ -1,6 +1,7 @@
 """Tests for faster-whisper transcription without downloading models."""
 
 from pathlib import Path
+import logging
 import threading
 import time
 from types import SimpleNamespace
@@ -95,16 +96,68 @@ def test_missing_input_is_reported_without_loading_model(tmp_path: Path) -> None
         service.transcribe(tmp_path / "missing.mp4", ScanSettings())
 
 
-def test_cuda_model_failure_suggests_safe_fallback(tmp_path: Path) -> None:
+def test_cuda_initialization_failure_falls_back_to_cpu_int8(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
+    calls: list[dict[str, object]] = []
+    model = FakeModel()
 
-    def fail(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("CUDA driver unavailable")
+    def factory(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        if kwargs["device"] == "cuda":
+            raise RuntimeError(
+                "Requested float16 compute type, but the target device or backend "
+                "do not support efficient float16 computation."
+            )
+        return model
 
-    service = TranscriptionService(fail)
-    with pytest.raises(TranscriptionError, match="choose Auto or CPU"):
+    statuses: list[str] = []
+    service = TranscriptionService(factory, cuda_checker=lambda: True)
+    with caplog.at_level(logging.INFO, logger="app.core.transcription"):
+        service.transcribe(video, ScanSettings(device="CUDA"), statuses.append)
+
+    assert calls == [
+        {"device": "cuda", "compute_type": "float16"},
+        {"device": "cpu", "compute_type": "int8"},
+    ]
+    assert "CUDA unavailable — using CPU fallback (int8)" in statuses
+    assert "device=cuda compute_type=float16" in caplog.text
+    assert "device=cpu compute_type=int8" in caplog.text
+    assert "Requested float16 compute type" in caplog.text
+
+
+def test_successful_cuda_initialization_does_not_fall_back(tmp_path: Path) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    calls: list[dict[str, object]] = []
+
+    def factory(*args: object, **kwargs: object) -> FakeModel:
+        calls.append(kwargs)
+        return FakeModel()
+
+    TranscriptionService(factory, cuda_checker=lambda: True).transcribe(
+        video, ScanSettings(device="Auto")
+    )
+
+    assert calls == [{"device": "cuda", "compute_type": "float16"}]
+
+
+def test_unrelated_cuda_model_error_is_reported_without_fallback(tmp_path: Path) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    calls: list[dict[str, object]] = []
+
+    def factory(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        raise RuntimeError("Model files are corrupted")
+
+    service = TranscriptionService(factory, cuda_checker=lambda: True)
+    with pytest.raises(TranscriptionError, match="Model files are corrupted"):
         service.transcribe(video, ScanSettings(device="CUDA"))
+
+    assert calls == [{"device": "cuda", "compute_type": "float16"}]
 
 
 def test_window_runs_transcription_in_background_and_restores_controls(

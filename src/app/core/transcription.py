@@ -1,6 +1,7 @@
 """Speech transcription backed by faster-whisper."""
 
 from collections.abc import Callable
+import logging
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -9,6 +10,7 @@ from app.core.models import Device, ScanSettings, WordTimestamp
 
 StatusCallback = Callable[[str], None]
 ModelFactory = Callable[..., Any]
+LOGGER = logging.getLogger(__name__)
 
 
 class TranscriptionError(RuntimeError):
@@ -48,6 +50,25 @@ def resolve_device(
     return "cpu", "int8"
 
 
+def _is_cuda_compatibility_error(error: Exception) -> bool:
+    """Identify expected CUDA/backend errors that are safe to retry on CPU."""
+    message = str(error).casefold()
+    compatibility_markers = (
+        "requested float16 compute type",
+        "target device or backend",
+        "cuda driver",
+        "cuda runtime",
+        "cuda error",
+        "cudnn",
+        "cublas",
+        "no cuda capable device",
+        "invalid device ordinal",
+    )
+    return any(marker in message for marker in compatibility_markers) or (
+        "compute type" in message and "support" in message
+    )
+
+
 def _default_model_factory(model_name: str, **kwargs: object) -> Any:
     try:
         from faster_whisper import WhisperModel
@@ -85,6 +106,11 @@ class TranscriptionService:
         token = cancellation_token or CancellationToken()
         token.raise_if_cancelled()
         device, compute_type = resolve_device(settings.device, self._cuda_checker)
+        LOGGER.info(
+            "Whisper runtime selected: device=%s compute_type=%s",
+            device,
+            compute_type,
+        )
         cache_key = (settings.whisper_model, device, compute_type)
 
         model = self._models.get(cache_key)
@@ -97,17 +123,36 @@ class TranscriptionService:
                     device=device,
                     compute_type=compute_type,
                 )
-            except TranscriptionError:
-                raise
             except Exception as error:
-                device_hint = (
-                    " CUDA may no longer be available; choose Auto or CPU and retry."
-                    if settings.device == "CUDA"
-                    else ""
+                if device != "cuda" or not _is_cuda_compatibility_error(error):
+                    raise TranscriptionError(
+                        f"Could not load the Whisper model: {error}"
+                    ) from error
+                LOGGER.warning(
+                    "CUDA Whisper initialization failed; retrying with "
+                    "device=cpu compute_type=int8",
+                    exc_info=error,
                 )
-                raise TranscriptionError(
-                    f"Could not load the Whisper model: {error}.{device_hint}"
-                ) from error
+                notify("CUDA unavailable — using CPU fallback (int8)")
+                token.raise_if_cancelled()
+                device, compute_type = "cpu", "int8"
+                cache_key = (settings.whisper_model, device, compute_type)
+                model = self._models.get(cache_key)
+                if model is None:
+                    try:
+                        model = self._model_factory(
+                            settings.whisper_model,
+                            device=device,
+                            compute_type=compute_type,
+                        )
+                    except Exception as fallback_error:
+                        raise TranscriptionError(
+                            "Could not load the Whisper model after CPU fallback: "
+                            f"{fallback_error}"
+                        ) from fallback_error
+                LOGGER.info(
+                    "Whisper runtime fallback selected: device=cpu compute_type=int8"
+                )
             self._models[cache_key] = model
 
         notify("Transcribing")
