@@ -23,10 +23,11 @@ from app.core.media_info import inspect_media
 from app.core.models import (
     ApplicationState,
     MediaInfo,
+    ScanResult,
     ScanSettings,
     VideoFile,
-    WordTimestamp,
 )
+from app.core.profanity_detector import ProfanityDetector, ProfanityScanner
 from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
 from app.gui.scan_settings import ScanSettingsWidget
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         media_inspector: Callable[[Path], MediaInfo] = inspect_media,
         settings_store: SettingsStore | None = None,
         transcriber: Transcriber | None = None,
+        profanity_scanner: ProfanityScanner | None = None,
     ) -> None:
         super().__init__()
         self._settings_store = settings_store or SettingsStore()
@@ -49,6 +51,9 @@ class MainWindow(QMainWindow):
         self._media_inspector = media_inspector
         self._transcriber = (
             transcriber if transcriber is not None else TranscriptionService()
+        )
+        self._profanity_scanner = (
+            profanity_scanner if profanity_scanner is not None else ProfanityDetector()
         )
         self._inspection_workers: dict[QThread, MediaInspectionWorker] = {}
         self._transcription_thread: QThread | None = None
@@ -81,9 +86,7 @@ class MainWindow(QMainWindow):
         sections.setSpacing(16)
         sections.addWidget(self._create_video_input_section(), 0, 0)
         sections.addWidget(self._create_scan_settings_section(), 0, 1)
-        sections.addWidget(
-            self._create_section("detectedProfanity", "Detected profanity"), 1, 0
-        )
+        sections.addWidget(self._create_results_section(), 1, 0)
         sections.addWidget(self._create_section("exportControls", "Export controls"), 1, 1)
         sections.setRowStretch(0, 1)
         sections.setRowStretch(1, 1)
@@ -92,6 +95,16 @@ class MainWindow(QMainWindow):
         layout.addLayout(sections, 1)
 
         return central_widget
+
+    def _create_results_section(self) -> QFrame:
+        section = self._create_section(
+            "detectedProfanity", "Detected profanity", add_placeholder=False
+        )
+        self.detection_count_label = QLabel("No scan results")
+        self.detection_count_label.setObjectName("detectionCount")
+        self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        section.layout().addWidget(self.detection_count_label)
+        return section
 
     def _create_scan_settings_section(self) -> QFrame:
         section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
@@ -235,6 +248,8 @@ class MainWindow(QMainWindow):
             return
 
         self.state.word_timestamps.clear()
+        self.state.profanity_matches.clear()
+        self.detection_count_label.setText("Scanning...")
         self._set_scan_controls_enabled(False)
         self.statusBar().showMessage("Preparing transcription")
 
@@ -243,6 +258,7 @@ class MainWindow(QMainWindow):
             self.state.selected_video.path,
             self.state.scan_settings,
             self._transcriber,
+            self._profanity_scanner,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -256,9 +272,12 @@ class MainWindow(QMainWindow):
         self._transcription_worker = worker
         thread.start()
 
-    def _on_transcription_succeeded(self, words: list[WordTimestamp]) -> None:
-        self.state.word_timestamps = list(words)
-        self.statusBar().showMessage(f"Transcription complete: {len(words)} words")
+    def _on_transcription_succeeded(self, result: ScanResult) -> None:
+        self.state.word_timestamps = list(result.words)
+        self.state.profanity_matches = list(result.matches)
+        count = len(result.matches)
+        self.detection_count_label.setText(f"Detected profanity: {count}")
+        self.statusBar().showMessage(f"Scan complete: {count} detections")
 
     def _on_transcription_failed(self, message: str) -> None:
         self.statusBar().showMessage("Transcription failed")

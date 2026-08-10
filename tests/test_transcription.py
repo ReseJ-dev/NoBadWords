@@ -8,9 +8,16 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from app.core.models import ScanSettings, VideoFile, WordTimestamp
+from app.core.models import ProfanityMatch, ScanSettings, VideoFile, WordTimestamp
 from app.core.transcription import TranscriptionError, TranscriptionService, resolve_device
 from app.gui.main_window import MainWindow
+
+
+class FakeProfanity:
+    def detect(self, words, minimum_confidence):
+        return [
+            ProfanityMatch("hello", "hello", 0.0, 0.4, 0.9, "test-rule")
+        ]
 
 
 class FakeModel:
@@ -103,7 +110,9 @@ def test_window_runs_transcription_in_background_and_restores_controls(
             assert release.wait(timeout=2)
             return [WordTimestamp("hello", 0.0, 0.4, 0.9)]
 
-    window = MainWindow(transcriber=BlockingTranscriber())
+    window = MainWindow(
+        transcriber=BlockingTranscriber(), profanity_scanner=FakeProfanity()
+    )
     window.state.selected_video = VideoFile.from_path(video)
 
     window.scan_settings_widget.scan_button.click()
@@ -117,8 +126,10 @@ def test_window_runs_transcription_in_background_and_restores_controls(
         time.sleep(0.01)
 
     assert window.state.word_timestamps == [WordTimestamp("hello", 0.0, 0.4, 0.9)]
+    assert len(window.state.profanity_matches) == 1
+    assert window.detection_count_label.text() == "Detected profanity: 1"
     assert window.choose_video_button.isEnabled()
-    assert "Transcription complete" in window.statusBar().currentMessage()
+    assert "Scan complete" in window.statusBar().currentMessage()
 
     window.close()
     application.processEvents()

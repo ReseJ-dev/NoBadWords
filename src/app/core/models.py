@@ -35,6 +35,27 @@ class WordTimestamp:
 
 
 @dataclass(frozen=True, slots=True)
+class ProfanityMatch:
+    """A profanity rule matched to a word-level timestamp."""
+
+    original_word: str
+    normalized_word: str
+    start: float
+    end: float
+    confidence: float
+    matched_rule: str
+    enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ScanResult:
+    """Complete backend result of a speech scan."""
+
+    words: list[WordTimestamp]
+    matches: list[ProfanityMatch]
+
+
+@dataclass(frozen=True, slots=True)
 class VideoFile:
     """A video selected in the desktop application."""
 
@@ -57,6 +78,7 @@ class ApplicationState:
     media_info: "MediaInfo | None" = None
     scan_settings: ScanSettings = field(default_factory=ScanSettings)
     word_timestamps: list[WordTimestamp] = field(default_factory=list)
+    profanity_matches: list[ProfanityMatch] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

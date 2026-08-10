@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from app.core.models import MediaInfo, ScanSettings
+from app.core.models import MediaInfo, ScanResult, ScanSettings
+from app.core.profanity_detector import ProfanityScanner
 from app.core.transcription import Transcriber
 
 
@@ -48,12 +49,14 @@ class TranscriptionWorker(QObject):
         path: Path,
         settings: ScanSettings,
         transcriber: Transcriber,
+        profanity_scanner: ProfanityScanner,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
         self._settings = settings
         self._transcriber = transcriber
+        self._profanity_scanner = profanity_scanner
 
     @Slot()
     def run(self) -> None:
@@ -61,9 +64,13 @@ class TranscriptionWorker(QObject):
             words = self._transcriber.transcribe(
                 self._path, self._settings, self.status_changed.emit
             )
+            self.status_changed.emit("Detecting profanity")
+            matches = self._profanity_scanner.detect(
+                words, self._settings.confidence
+            )
         except Exception as error:
             self.failed.emit(str(error))
         else:
-            self.succeeded.emit(words)
+            self.succeeded.emit(ScanResult(words=words, matches=matches))
         finally:
             self.completed.emit()
