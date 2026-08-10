@@ -71,6 +71,19 @@ def test_parse_media_info_rejects_missing_video_stream() -> None:
         parse_media_info({"format": {"duration": "2"}, "streams": []})
 
 
+@pytest.mark.parametrize("duration", ["0", "-1", "nan", "inf"])
+def test_parse_media_info_rejects_invalid_duration(duration: str) -> None:
+    payload = {
+        "format": {"duration": duration},
+        "streams": [{
+            "codec_type": "video", "width": 1, "height": 1,
+            "avg_frame_rate": "0/0",
+        }],
+    }
+    with pytest.raises(MediaInspectionError, match="invalid video"):
+        parse_media_info(payload)
+
+
 def test_ffmpeg_discovery_reports_missing_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.core.ffmpeg_utils.shutil.which", lambda name: None)
 

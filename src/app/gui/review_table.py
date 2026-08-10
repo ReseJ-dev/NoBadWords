@@ -1,6 +1,7 @@
 """Profanity review table and its editable data model."""
 
 from dataclasses import replace
+import math
 from enum import IntEnum
 from typing import Sequence
 
@@ -113,7 +114,7 @@ class ProfanityTableModel(QAbstractTableModel):
                 timestamp = float(value)
             except (TypeError, ValueError):
                 return False
-            if timestamp < 0:
+            if not math.isfinite(timestamp) or timestamp < 0:
                 return False
             if column == ReviewColumn.START and timestamp < match.end:
                 updated = replace(match, start=timestamp)
@@ -174,7 +175,7 @@ class ProfanityTableModel(QAbstractTableModel):
             self._emit_matches()
 
     def add_manual_detection(self, start: float, end: float, label: str = "") -> None:
-        if start < 0 or end <= start:
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
             raise ValueError("Manual detection end time must be later than its start time.")
         display_label = label.strip() or "Manual detection"
         match = ProfanityMatch(

@@ -458,7 +458,9 @@ class MainWindow(QMainWindow):
         ready = (
             self.state.selected_video is not None
             and self.state.media_info is not None
-            and self.state.media_info.audio_stream_count > 0
+            and (
+                self.state.media_info.audio_stream_count > 0 or mode == "Cut"
+            )
             and bool(self.state.censor_intervals)
             and mode in ("Mute", "Beep", "Cut")
             and self._transcription_thread is None
@@ -470,6 +472,7 @@ class MainWindow(QMainWindow):
         if (
             self.state.media_info is not None
             and self.state.media_info.audio_stream_count == 0
+            and mode != "Cut"
         ):
             status = "Export status: The source video has no audio stream"
         elif not self.state.censor_intervals:
@@ -503,6 +506,7 @@ class MainWindow(QMainWindow):
             intervals=tuple(self.state.censor_intervals),
             media_duration=self.state.media_info.duration,
             beep_frequency_hz=self.state.scan_settings.beep_frequency_hz,
+            audio_stream_count=self.state.media_info.audio_stream_count,
         )
         self._start_export(request)
 

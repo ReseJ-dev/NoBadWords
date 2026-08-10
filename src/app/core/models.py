@@ -74,6 +74,7 @@ class ExportRequest:
     intervals: tuple[CensorInterval, ...]
     media_duration: float
     beep_frequency_hz: int = 1000
+    audio_stream_count: int = 1
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,7 @@
 """FFprobe command construction and media metadata parsing."""
 
 import json
+import math
 from pathlib import Path
 import subprocess
 from typing import Any, Mapping
@@ -73,6 +74,8 @@ def parse_media_info(payload: Mapping[str, Any]) -> MediaInfo:
         height = int(video["height"])
     except (KeyError, TypeError, ValueError) as error:
         raise MediaInspectionError("FFprobe output is missing required video metadata.") from error
+    if not math.isfinite(duration) or duration <= 0 or width <= 0 or height <= 0:
+        raise MediaInspectionError("FFprobe returned invalid video dimensions or duration.")
 
     frame_rate = _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate"))
     sample_rate = _parse_optional_int(audio.get("sample_rate")) if audio else None
@@ -106,4 +109,3 @@ def _parse_optional_int(value: object) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-

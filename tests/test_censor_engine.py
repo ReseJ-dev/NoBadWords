@@ -89,6 +89,33 @@ def test_empty_intervals_copy_all_streams(tmp_path: Path) -> None:
 
     assert "-filter_complex" not in command
     assert command[command.index("-c") + 1] == "copy"
+    assert command[command.index("-map") + 1] == "0"
+
+
+def test_mute_processes_every_audio_stream(tmp_path: Path) -> None:
+    source = tmp_path / "source with audio.mkv"
+    source.write_bytes(b"video")
+    base_request = request(source, tmp_path / "output.mkv")
+    export_request = ExportRequest(
+        base_request.input_path, base_request.output_path, base_request.mode,
+        base_request.intervals, base_request.media_duration,
+        base_request.beep_frequency_hz, audio_stream_count=2,
+    )
+    command = build_export_command("ffmpeg", export_request)
+    graph = command[command.index("-filter_complex") + 1]
+    assert "[0:a:0]" in graph and "[0:a:1]" in graph
+    assert "[aout0]" in command and "[aout1]" in command
+
+
+def test_audio_modes_reject_video_without_audio(tmp_path: Path) -> None:
+    source = tmp_path / "silent.mp4"
+    source.write_bytes(b"video")
+    export_request = ExportRequest(
+        source, tmp_path / "output.mp4", "Mute", (interval(0.1, 0.2),), 1.0,
+        audio_stream_count=0,
+    )
+    with pytest.raises(CensorExportError, match="require a source audio"):
+        build_export_command("ffmpeg", export_request)
 
 
 def test_export_engine_runs_argument_list_and_reports_stages(

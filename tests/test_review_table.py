@@ -45,6 +45,8 @@ def test_enabled_state_and_timestamps_are_editable() -> None:
     assert (updated.start, updated.end) == (0.75, 2.25)
     assert not model.setData(model.index(0, ReviewColumn.START), 3.0)
     assert not model.setData(model.index(0, ReviewColumn.END), -1.0)
+    assert not model.setData(model.index(0, ReviewColumn.END), float("inf"))
+    assert not model.setData(model.index(0, ReviewColumn.START), float("nan"))
 
 
 def test_select_all_and_deselect_all() -> None:
@@ -69,6 +71,8 @@ def test_delete_selected_rows_and_add_manual_detection() -> None:
     assert model.matches[-1].confidence == 1.0
     with pytest.raises(ValueError):
         model.add_manual_detection(3.0, 2.0)
+    with pytest.raises(ValueError):
+        model.add_manual_detection(3.0, float("inf"))
 
 
 def test_timestamp_sorting() -> None:

@@ -95,6 +95,18 @@ def test_missing_input_is_reported_without_loading_model(tmp_path: Path) -> None
         service.transcribe(tmp_path / "missing.mp4", ScanSettings())
 
 
+def test_cuda_model_failure_suggests_safe_fallback(tmp_path: Path) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+
+    def fail(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("CUDA driver unavailable")
+
+    service = TranscriptionService(fail)
+    with pytest.raises(TranscriptionError, match="choose Auto or CPU"):
+        service.transcribe(video, ScanSettings(device="CUDA"))
+
+
 def test_window_runs_transcription_in_background_and_restores_controls(
     tmp_path: Path,
 ) -> None:

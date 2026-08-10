@@ -100,7 +100,14 @@ class TranscriptionService:
             except TranscriptionError:
                 raise
             except Exception as error:
-                raise TranscriptionError(f"Could not load the Whisper model: {error}") from error
+                device_hint = (
+                    " CUDA may no longer be available; choose Auto or CPU and retry."
+                    if settings.device == "CUDA"
+                    else ""
+                )
+                raise TranscriptionError(
+                    f"Could not load the Whisper model: {error}.{device_hint}"
+                ) from error
             self._models[cache_key] = model
 
         notify("Transcribing")

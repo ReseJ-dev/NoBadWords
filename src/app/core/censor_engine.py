@@ -51,22 +51,27 @@ def build_audio_filter(
     media_duration: float,
     beep_frequency_hz: int = 1000,
     sample_rate: int = 48_000,
+    stream_index: int = 0,
+    output_label: str = "aout",
 ) -> str:
     """Build an audio filter graph for Mute or Beep mode."""
     expression = interval_expression(intervals)
-    muted = f"[0:a:0]volume=0:enable='{expression}'[clean]"
+    clean_label = "clean" if stream_index == 0 else f"clean{stream_index}"
+    muted = f"[0:a:{stream_index}]volume=0:enable='{expression}'[{clean_label}]"
     if mode == "Mute":
-        return muted.removesuffix("[clean]") + "[aout]"
+        return muted.removesuffix(f"[{clean_label}]") + f"[{output_label}]"
     if mode == "Beep":
         if not 100 <= beep_frequency_hz <= 20_000:
             raise ValueError("Beep frequency must be between 100 and 20000 Hz.")
+        beep_label = "beep" if stream_index == 0 else f"beep{stream_index}"
+        tone_label = "tone" if stream_index == 0 else f"tone{stream_index}"
         return (
             f"{muted};"
             f"sine=frequency={beep_frequency_hz}:sample_rate={sample_rate}:"
-            f"duration={_number(media_duration)}[beep];"
-            f"[beep]volume=0:enable='not({expression})'[tone];"
-            "[clean][tone]amix=inputs=2:duration=first:dropout_transition=0:"
-            "normalize=0[aout]"
+            f"duration={_number(media_duration)}[{beep_label}];"
+            f"[{beep_label}]volume=0:enable='not({expression})'[{tone_label}];"
+            f"[{clean_label}][{tone_label}]amix=inputs=2:duration=first:"
+            f"dropout_transition=0:normalize=0[{output_label}]"
         )
     raise ValueError(f"Audio filter mode is not supported: {mode}")
 
@@ -119,7 +124,8 @@ def build_keep_segments(
 
 
 def build_cut_filter(
-    intervals: Sequence[CensorInterval], media_duration: float
+    intervals: Sequence[CensorInterval], media_duration: float,
+    audio_stream_count: int = 1,
 ) -> str:
     """Build synchronized trim and concat filters for Cut mode."""
     segments = build_keep_segments(intervals, media_duration)
@@ -130,16 +136,25 @@ def build_cut_filter(
     for index, segment in enumerate(segments):
         start = _number(segment.source_start)
         end = _number(segment.source_end)
-        filters.extend(
-            (
-                f"[0:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{index}]",
-                f"[0:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{index}]",
-            )
+        filters.append(
+            f"[0:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{index}]"
         )
-        concat_inputs.append(f"[v{index}][a{index}]")
+        audio_inputs = ""
+        for audio_index in range(audio_stream_count):
+            label = f"a{audio_index}_{index}" if audio_stream_count > 1 else f"a{index}"
+            filters.append(
+                f"[0:a:{audio_index}]atrim=start={start}:end={end},"
+                f"asetpts=PTS-STARTPTS[{label}]"
+            )
+            audio_inputs += f"[{label}]"
+        concat_inputs.append(f"[v{index}]{audio_inputs}")
+    output_labels = "".join(
+        f"[aout{index}]" if audio_stream_count > 1 else "[aout]"
+        for index in range(audio_stream_count)
+    )
     filters.append(
         "".join(concat_inputs)
-        + f"concat=n={len(segments)}:v=1:a=1[vout][aout]"
+        + f"concat=n={len(segments)}:v=1:a={audio_stream_count}[vout]{output_labels}"
     )
     return ";".join(filters)
 
@@ -152,20 +167,19 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
     if not request.intervals:
         return base + [
             "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0",
+            "0",
             "-c",
             "copy",
         ] + progress + [str(request.output_path)]
     if request.mode == "Cut":
         return base + [
             "-filter_complex",
-            build_cut_filter(request.intervals, request.media_duration),
+            build_cut_filter(
+                request.intervals, request.media_duration, request.audio_stream_count
+            ),
             "-map",
             "[vout]",
-            "-map",
-            "[aout]",
+        ] + _audio_map_arguments(request.audio_stream_count) + [
             "-c:v",
             "libx264",
             "-preset",
@@ -177,19 +191,22 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
             "-movflags",
             "+faststart",
         ] + progress + [str(request.output_path)]
-    audio_filter = build_audio_filter(
-        request.mode,
-        request.intervals,
-        request.media_duration,
-        request.beep_frequency_hz,
+    if request.audio_stream_count == 0:
+        raise CensorExportError("Mute and Beep require a source audio stream.")
+    audio_filter = ";".join(
+        build_audio_filter(
+            request.mode, request.intervals, request.media_duration,
+            request.beep_frequency_hz, stream_index=index,
+            output_label="aout" if request.audio_stream_count == 1 else f"aout{index}",
+        )
+        for index in range(request.audio_stream_count)
     )
     return base + [
         "-filter_complex",
         audio_filter,
         "-map",
         "0:v:0",
-        "-map",
-        "[aout]",
+    ] + _audio_map_arguments(request.audio_stream_count) + [
         "-c:v",
         "copy",
         "-c:a",
@@ -289,6 +306,16 @@ def _validate_request(request: ExportRequest) -> None:
         for interval in request.intervals
     ):
         raise CensorExportError("Censorship intervals must be within the media duration.")
+    if request.audio_stream_count < 0:
+        raise CensorExportError("Audio stream count cannot be negative.")
+
+
+def _audio_map_arguments(count: int) -> list[str]:
+    arguments: list[str] = []
+    for index in range(count):
+        label = "[aout]" if count == 1 else f"[aout{index}]"
+        arguments.extend(("-map", label))
+    return arguments
 
 
 def _number(value: float) -> str:

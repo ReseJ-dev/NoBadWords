@@ -96,3 +96,30 @@ def test_cut_command_maps_filtered_streams_and_reencodes_video(tmp_path: Path) -
     assert "copy" not in command
     assert command[-1] == str(output)
 
+
+def test_cut_supports_video_without_audio(tmp_path: Path) -> None:
+    source = tmp_path / "silent source.webm"
+    source.write_bytes(b"video")
+    request = ExportRequest(
+        source, tmp_path / "silent cut.mp4", "Cut", (cut(1.0, 2.0),), 5.0,
+        audio_stream_count=0,
+    )
+    command = build_export_command("ffmpeg", request)
+    graph = command[command.index("-filter_complex") + 1]
+    assert "concat=n=2:v=1:a=0[vout]" in graph
+    assert "[0:a:" not in graph
+    assert "[aout]" not in command
+
+
+def test_cut_keeps_multiple_audio_streams_synchronized(tmp_path: Path) -> None:
+    source = tmp_path / "медиа с дорожками.mkv"
+    source.write_bytes(b"video")
+    request = ExportRequest(
+        source, tmp_path / "clean output.mkv", "Cut", (cut(1.0, 2.0),), 5.0,
+        audio_stream_count=2,
+    )
+    command = build_export_command("ffmpeg", request)
+    graph = command[command.index("-filter_complex") + 1]
+    assert "[0:a:0]atrim" in graph and "[0:a:1]atrim" in graph
+    assert "concat=n=2:v=1:a=2[vout][aout0][aout1]" in graph
+    assert "[aout0]" in command and "[aout1]" in command
