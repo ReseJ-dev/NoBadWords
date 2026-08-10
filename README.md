@@ -32,6 +32,9 @@ Mute, Beep, and Cut modes can export an MP4 cleaned copy through FFmpeg. Renderi
 runs in a background worker, preserves the original video stream when possible,
 and reports the current export stage and output path in the interface.
 
+The built-in preview supports playback, pausing, timeline seeking, and direct
+navigation to reviewed detections with one second of context.
+
 Scan and censorship preferences are saved through the operating system's Qt
 settings store and restored the next time the application starts. The Scan
 Video button runs faster-whisper transcription in a background worker so the

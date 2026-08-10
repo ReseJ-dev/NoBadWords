@@ -35,6 +35,7 @@ from app.core.profanity_detector import ProfanityDetector, ProfanityScanner
 from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
 from app.gui.export_controls import ExportControlsWidget
+from app.gui.preview_widget import VideoPreviewWidget
 from app.gui.review_table import ProfanityReviewWidget
 from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
@@ -69,7 +70,7 @@ class MainWindow(QMainWindow):
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
         self.setWindowTitle("Video Profanity Censor")
-        self.setMinimumSize(960, 640)
+        self.setMinimumSize(1100, 800)
         self.setCentralWidget(self._create_central_widget())
         self.statusBar().showMessage("Ready")
 
@@ -98,13 +99,23 @@ class MainWindow(QMainWindow):
         sections.addWidget(self._create_scan_settings_section(), 0, 1)
         sections.addWidget(self._create_results_section(), 1, 0)
         sections.addWidget(self._create_export_section(), 1, 1)
+        sections.addWidget(self._create_preview_section(), 2, 0, 1, 2)
         sections.setRowStretch(0, 1)
         sections.setRowStretch(1, 1)
+        sections.setRowStretch(2, 2)
         sections.setColumnStretch(0, 1)
         sections.setColumnStretch(1, 1)
         layout.addLayout(sections, 1)
 
         return central_widget
+
+    def _create_preview_section(self) -> QFrame:
+        section = self._create_section(
+            "videoPreviewSection", "Video preview", add_placeholder=False
+        )
+        self.preview_widget = VideoPreviewWidget()
+        section.layout().addWidget(self.preview_widget)
+        return section
 
     def _create_export_section(self) -> QFrame:
         section = self._create_section(
@@ -129,6 +140,7 @@ class MainWindow(QMainWindow):
         section.layout().addWidget(self.effective_duration_label)
         self.review_widget = ProfanityReviewWidget()
         self.review_widget.matches_changed.connect(self._on_review_matches_changed)
+        self.review_widget.detection_activated.connect(self._seek_to_detection)
         section.layout().addWidget(self.review_widget)
         return section
 
@@ -136,6 +148,11 @@ class MainWindow(QMainWindow):
         self.state.profanity_matches = list(matches)
         self.detection_count_label.setText(f"Detected profanity: {len(matches)}")
         self._refresh_censor_intervals()
+        if hasattr(self, "preview_widget"):
+            self.preview_widget.set_detections(matches)
+
+    def _seek_to_detection(self, detection: ProfanityMatch) -> None:
+        self.preview_widget.seek_to_detection(detection)
 
     def _create_scan_settings_section(self) -> QFrame:
         section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
@@ -233,6 +250,7 @@ class MainWindow(QMainWindow):
             "Export status: Waiting for enabled detections"
         )
         self.review_widget.set_matches([])
+        self.preview_widget.set_source(video.path)
         self.export_controls.output_label.setText("Output: Not exported")
         self.video_filename_label.setText(f"Filename: {video.path.name}")
         self.video_path_label.setText(f"Full path: {video.path}")
@@ -456,6 +474,7 @@ class MainWindow(QMainWindow):
         self.choose_video_button.setEnabled(enabled)
         self.scan_settings_widget.setEnabled(enabled)
         self.review_widget.setEnabled(enabled)
+        self.preview_widget.setEnabled(enabled)
         self.export_controls.setEnabled(enabled)
         if enabled:
             self._update_export_availability()

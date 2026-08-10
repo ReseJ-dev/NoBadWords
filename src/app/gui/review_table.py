@@ -205,6 +205,7 @@ class ProfanityReviewWidget(QWidget):
     """Table and controls for reviewing detected profanity."""
 
     matches_changed = Signal(object)
+    detection_activated = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -220,6 +221,7 @@ class ProfanityReviewWidget(QWidget):
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.doubleClicked.connect(self._activate_detection)
         layout.addWidget(self.table)
 
         controls = QHBoxLayout()
@@ -260,3 +262,8 @@ class ProfanityReviewWidget(QWidget):
                 dialog.end_spin.value(),
                 dialog.label_input.text(),
             )
+
+    def _activate_detection(self, index: QModelIndex) -> None:
+        matches = self.model.matches
+        if index.isValid() and 0 <= index.row() < len(matches):
+            self.detection_activated.emit(matches[index.row()])
