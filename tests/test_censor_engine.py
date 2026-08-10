@@ -1,7 +1,6 @@
 """Tests for Mute and Beep FFmpeg exports."""
 
 from pathlib import Path
-import subprocess
 import threading
 import time
 
@@ -100,11 +99,20 @@ def test_export_engine_runs_argument_list_and_reports_stages(
     output = tmp_path / "output.mp4"
     captured: list[list[str]] = []
 
-    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured.append(command)
-        return subprocess.CompletedProcess(command, 0, "", "")
+    class FakeProcess:
+        returncode = 0
 
-    monkeypatch.setattr("app.core.censor_engine.subprocess.run", fake_run)
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            captured.append(command)
+
+        def communicate(self) -> tuple[str, str]:
+            return "", ""
+
+        def poll(self) -> int:
+            return self.returncode
+
+    monkeypatch.setattr("app.core.censor_engine.subprocess.Popen", FakeProcess)
+
     tools = FFmpegTools(tmp_path / "ffmpeg.exe", tmp_path / "ffprobe.exe")
     statuses: list[str] = []
 
@@ -125,10 +133,19 @@ def test_export_rejects_source_overwrite_and_surfaces_ffmpeg_error(
     with pytest.raises(CensorExportError, match="cannot be overwritten"):
         CensorEngine(tools).export(request(source, source))
 
-    monkeypatch.setattr(
-        "app.core.censor_engine.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", "bad codec"),
-    )
+    class FailedProcess:
+        returncode = 1
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def communicate(self) -> tuple[str, str]:
+            return "", "bad codec"
+
+        def poll(self) -> int:
+            return self.returncode
+
+    monkeypatch.setattr("app.core.censor_engine.subprocess.Popen", FailedProcess)
     with pytest.raises(CensorExportError, match="bad codec"):
         CensorEngine(tools).export(request(source, tmp_path / "output.mp4"))
 
@@ -154,7 +171,10 @@ def test_window_runs_export_outside_gui_thread(tmp_path: Path) -> None:
     release = threading.Event()
 
     class BlockingExporter:
-        def export(self, export_request: ExportRequest, status_callback=None) -> Path:
+        def export(
+            self, export_request: ExportRequest, status_callback=None,
+            cancellation_token=None,
+        ) -> Path:
             if status_callback:
                 status_callback("Rendering video")
             assert release.wait(timeout=2)

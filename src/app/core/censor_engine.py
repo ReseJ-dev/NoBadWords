@@ -3,8 +3,10 @@
 from collections.abc import Callable, Sequence
 from pathlib import Path
 import subprocess
+import threading
 from typing import Protocol
 
+from app.core.cancellation import CancellationToken, OperationCancelled
 from app.core.ffmpeg_utils import FFmpegTools, discover_ffmpeg_tools
 from app.core.models import (
     CensorInterval,
@@ -27,6 +29,7 @@ class VideoExporter(Protocol):
         self,
         request: ExportRequest,
         status_callback: ExportStatusCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
     ) -> Path: ...
 
 
@@ -206,27 +209,50 @@ class CensorEngine:
         self,
         request: ExportRequest,
         status_callback: ExportStatusCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
     ) -> Path:
         notify = status_callback or (lambda status: None)
+        token = cancellation_token or CancellationToken()
+        token.raise_if_cancelled()
         notify("Preparing filters")
         tools = self._tools or discover_ffmpeg_tools()
         command = build_export_command(tools.ffmpeg, request)
+        token.raise_if_cancelled()
         notify("Rendering video")
+        process: subprocess.Popen[str] | None = None
+        terminate_callback: Callable[[], None] | None = None
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                check=False,
             )
+            terminate_callback = lambda: _terminate_process(process)
+            token.add_callback(terminate_callback)
+            _, stderr = process.communicate()
+            token.raise_if_cancelled()
         except OSError as error:
+            _cleanup_incomplete_output(request)
             raise CensorExportError(f"Could not start FFmpeg: {error}") from error
-        if result.returncode != 0:
-            details = result.stderr.strip() or "FFmpeg returned an unknown error."
+        except OperationCancelled:
+            _cleanup_incomplete_output(request)
+            raise
+        finally:
+            if terminate_callback is not None:
+                token.remove_callback(terminate_callback)
+        if process.returncode != 0:
+            _cleanup_incomplete_output(request)
+            details = stderr.strip() or "FFmpeg returned an unknown error."
             raise CensorExportError(f"Video export failed: {details}")
         notify("Finalizing output")
+        try:
+            token.raise_if_cancelled()
+        except OperationCancelled:
+            _cleanup_incomplete_output(request)
+            raise
         return request.output_path
 
 
@@ -252,3 +278,30 @@ def _validate_request(request: ExportRequest) -> None:
 
 def _number(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except OSError:
+        return
+
+    def kill_if_running() -> None:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+    timer = threading.Timer(2.0, kill_if_running)
+    timer.daemon = True
+    timer.start()
+
+
+def _cleanup_incomplete_output(request: ExportRequest) -> None:
+    try:
+        request.output_path.unlink(missing_ok=True)
+    except OSError:
+        pass

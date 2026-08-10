@@ -104,7 +104,10 @@ def test_window_runs_transcription_in_background_and_restores_controls(
     release = threading.Event()
 
     class BlockingTranscriber:
-        def transcribe(self, path: Path, settings: ScanSettings, status_callback=None):
+        def transcribe(
+            self, path: Path, settings: ScanSettings, status_callback=None,
+            cancellation_token=None,
+        ):
             if status_callback:
                 status_callback("Transcribing")
             assert release.wait(timeout=2)

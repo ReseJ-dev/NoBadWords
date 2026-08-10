@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.core.cancellation import CancellationToken, OperationCancelled
 from app.core.models import Device, ScanSettings, WordTimestamp
 
 StatusCallback = Callable[[str], None]
@@ -22,6 +23,7 @@ class Transcriber(Protocol):
         path: Path,
         settings: ScanSettings,
         status_callback: StatusCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
     ) -> list[WordTimestamp]: ...
 
 
@@ -74,17 +76,21 @@ class TranscriptionService:
         path: Path,
         settings: ScanSettings,
         status_callback: StatusCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
     ) -> list[WordTimestamp]:
         """Transcribe a media file and return word-level timestamps."""
         if not path.is_file():
             raise TranscriptionError("The selected video file no longer exists.")
         notify = status_callback or (lambda status: None)
+        token = cancellation_token or CancellationToken()
+        token.raise_if_cancelled()
         device, compute_type = resolve_device(settings.device, self._cuda_checker)
         cache_key = (settings.whisper_model, device, compute_type)
 
         model = self._models.get(cache_key)
         if model is None:
             notify("Loading Whisper model")
+            token.raise_if_cancelled()
             try:
                 model = self._model_factory(
                     settings.whisper_model,
@@ -98,19 +104,25 @@ class TranscriptionService:
             self._models[cache_key] = model
 
         notify("Transcribing")
+        token.raise_if_cancelled()
         language = {"Russian": "ru", "English": "en", "Auto": None}[settings.language]
         try:
             segments, _ = model.transcribe(
                 str(path), language=language, word_timestamps=True
             )
-            return self._collect_words(segments)
+            return self._collect_words(segments, token)
+        except OperationCancelled:
+            raise
         except Exception as error:
             raise TranscriptionError(f"Transcription failed: {error}") from error
 
     @staticmethod
-    def _collect_words(segments: object) -> list[WordTimestamp]:
+    def _collect_words(
+        segments: object, cancellation_token: CancellationToken
+    ) -> list[WordTimestamp]:
         words: list[WordTimestamp] = []
         for segment in segments:
+            cancellation_token.raise_if_cancelled()
             for word in getattr(segment, "words", None) or ():
                 start = getattr(word, "start", None)
                 end = getattr(word, "end", None)
@@ -126,4 +138,3 @@ class TranscriptionService:
                     )
                 )
         return words
-

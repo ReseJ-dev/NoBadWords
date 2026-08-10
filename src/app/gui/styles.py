@@ -72,6 +72,15 @@ QPushButton[primary="true"]:disabled {
     background-color: #9ab8ce;
     color: #eef4f8;
 }
+QPushButton[danger="true"] {
+    background-color: #b23b3b;
+    border: none;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton[danger="true"]:hover {
+    background-color: #922f2f;
+}
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
     background-color: #ffffff;
     border: 1px solid #b8c4ce;

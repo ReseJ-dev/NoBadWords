@@ -3,8 +3,8 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QThread, QTimer, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self._transcription_worker: TranscriptionWorker | None = None
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
+        self._close_when_idle = False
         self.setWindowTitle("Video Profanity Censor")
         self.setMinimumSize(1100, 800)
         self.setCentralWidget(self._create_central_widget())
@@ -94,6 +95,14 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
+
+        self.cancel_button = QPushButton("Cancel Processing")
+        self.cancel_button.setObjectName("cancelProcessingButton")
+        self.cancel_button.setProperty("danger", True)
+        self.cancel_button.setToolTip("Safely stop the active scan or export")
+        self.cancel_button.clicked.connect(self._cancel_active_operation)
+        self.cancel_button.setVisible(False)
+        layout.addWidget(self.cancel_button)
 
         sections = QGridLayout()
         sections.setSpacing(20)
@@ -331,15 +340,24 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         worker.succeeded.connect(self._on_media_inspected)
         worker.failed.connect(self._on_media_inspection_failed)
+        worker.cancelled.connect(self._on_media_inspection_cancelled)
         worker.completed.connect(thread.quit)
         worker.completed.connect(worker.deleteLater)
         thread.finished.connect(lambda: self._release_inspection_thread(thread))
         self._inspection_workers[thread] = worker
+        self._update_cancel_button()
         thread.start()
 
     def _release_inspection_thread(self, thread: QThread) -> None:
         self._inspection_workers.pop(thread, None)
         thread.deleteLater()
+        self._update_cancel_button()
+        self._finish_pending_close_if_idle()
+
+    def _on_media_inspection_cancelled(self, path: Path) -> None:
+        if self.state.selected_video is not None and self.state.selected_video.path == path:
+            self.video_status_label.setText("Input status: Media inspection cancelled")
+            self.statusBar().showMessage("Media inspection cancelled")
 
     def _on_media_inspected(self, path: Path, media_info: MediaInfo) -> None:
         if self.state.selected_video is None or self.state.selected_video.path != path:
@@ -387,11 +405,13 @@ class MainWindow(QMainWindow):
         worker.status_changed.connect(self.statusBar().showMessage)
         worker.succeeded.connect(self._on_transcription_succeeded)
         worker.failed.connect(self._on_transcription_failed)
+        worker.cancelled.connect(self._on_transcription_cancelled)
         worker.completed.connect(thread.quit)
         worker.completed.connect(worker.deleteLater)
         thread.finished.connect(self._release_transcription_thread)
         self._transcription_thread = thread
         self._transcription_worker = worker
+        self._update_cancel_button()
         thread.start()
 
     def _on_transcription_succeeded(self, result: ScanResult) -> None:
@@ -491,11 +511,13 @@ class MainWindow(QMainWindow):
         worker.status_changed.connect(self._on_export_status_changed)
         worker.succeeded.connect(self._on_export_succeeded)
         worker.failed.connect(self._on_export_failed)
+        worker.cancelled.connect(self._on_export_cancelled)
         worker.completed.connect(thread.quit)
         worker.completed.connect(worker.deleteLater)
         thread.finished.connect(self._release_export_thread)
         self._export_thread = thread
         self._export_worker = worker
+        self._update_cancel_button()
         thread.start()
 
     def _on_export_status_changed(self, status: str) -> None:
@@ -513,12 +535,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Export failed")
         QMessageBox.warning(self, "Could not export video", message)
 
+    def _on_export_cancelled(self) -> None:
+        self.export_controls.status_label.setText("Export status: Cancelled")
+        self.export_controls.output_label.setText("Output: No file created")
+        self.statusBar().showMessage("Export cancelled safely")
+
     def _release_export_thread(self) -> None:
         thread = self._export_thread
         self._export_thread = None
         self._export_worker = None
         self.export_controls.export_button.setText("Export Video")
         self._set_scan_controls_enabled(True)
+        self._update_cancel_button()
+        self._finish_pending_close_if_idle()
         if thread is not None:
             thread.deleteLater()
 
@@ -526,12 +555,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Transcription failed")
         QMessageBox.warning(self, "Could not scan video", message)
 
+    def _on_transcription_cancelled(self) -> None:
+        self.detection_count_label.setText("Scan cancelled — no results changed")
+        self.statusBar().showMessage("Scan cancelled safely")
+
     def _release_transcription_thread(self) -> None:
         thread = self._transcription_thread
         self._transcription_thread = None
         self._transcription_worker = None
         self.scan_settings_widget.scan_button.setText("Scan Video")
         self._set_scan_controls_enabled(True)
+        self._update_cancel_button()
+        self._finish_pending_close_if_idle()
         if thread is not None:
             thread.deleteLater()
 
@@ -548,6 +583,53 @@ class MainWindow(QMainWindow):
                 self.export_action.setEnabled(False)
         if enabled:
             self._update_export_availability()
+
+    def _has_active_work(self) -> bool:
+        return bool(
+            self._inspection_workers
+            or self._transcription_thread is not None
+            or self._export_thread is not None
+        )
+
+    def _update_cancel_button(self) -> None:
+        active = self._has_active_work()
+        self.cancel_button.setVisible(active)
+        self.cancel_button.setEnabled(active)
+        self.cancel_button.setText("Cancel Processing")
+
+    def _cancel_active_operation(self) -> None:
+        if not self._has_active_work():
+            return
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.setText("Cancelling...")
+        self.statusBar().showMessage("Cancelling active processing...")
+        for worker in tuple(self._inspection_workers.values()):
+            worker.cancel()
+        if self._transcription_worker is not None:
+            self._transcription_worker.cancel()
+        if self._export_worker is not None:
+            self._export_worker.cancel()
+
+    def _finish_pending_close_if_idle(self) -> None:
+        if self._close_when_idle and not self._has_active_work():
+            QTimer.singleShot(0, self.close)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if not self._has_active_work():
+            self.preview_widget.player.stop()
+            event.accept()
+            return
+        response = QMessageBox.question(
+            self,
+            "Cancel processing and exit?",
+            "A background operation is still running. Cancel it safely and close?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response == QMessageBox.StandardButton.Yes:
+            self._close_when_idle = True
+            self._cancel_active_operation()
+        event.ignore()
 
     def _on_media_inspection_failed(self, path: Path, message: str) -> None:
         if self.state.selected_video is None or self.state.selected_video.path != path:
