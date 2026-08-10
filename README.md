@@ -58,3 +58,18 @@ and does not open a console window. To bundle media tools, place official
 `ffmpeg.exe` and `ffprobe.exe` binaries in `vendor/ffmpeg/bin` before building.
 If they are omitted, the application discovers both tools from the user's
 `PATH` and displays installation guidance when either is unavailable.
+
+## Build the Windows installer
+
+Install Inno Setup 6, build the executable, and then run:
+
+```powershell
+python scripts/build_windows.py
+python scripts/build_installer.py
+```
+
+If the compiler is not on `PATH`, set `INNO_SETUP_COMPILER` to its `ISCC.exe`.
+The installer is written under `dist/installer`, installs per user without an
+administrator prompt, adds a Start Menu shortcut, and offers an unchecked
+Desktop shortcut option. Upgrades use a stable application ID. User preferences
+stored by QSettings are deliberately not removed during upgrades or uninstall.
