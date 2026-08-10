@@ -20,11 +20,18 @@ from PySide6.QtWidgets import (
 
 from app.core.config import SettingsStore
 from app.core.media_info import inspect_media
-from app.core.models import ApplicationState, MediaInfo, ScanSettings, VideoFile
+from app.core.models import (
+    ApplicationState,
+    MediaInfo,
+    ScanSettings,
+    VideoFile,
+    WordTimestamp,
+)
+from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
 from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
-from app.gui.workers import MediaInspectionWorker
+from app.gui.workers import MediaInspectionWorker, TranscriptionWorker
 
 
 class MainWindow(QMainWindow):
@@ -34,12 +41,18 @@ class MainWindow(QMainWindow):
         self,
         media_inspector: Callable[[Path], MediaInfo] = inspect_media,
         settings_store: SettingsStore | None = None,
+        transcriber: Transcriber | None = None,
     ) -> None:
         super().__init__()
         self._settings_store = settings_store or SettingsStore()
         self.state = ApplicationState(scan_settings=self._settings_store.load())
         self._media_inspector = media_inspector
+        self._transcriber = (
+            transcriber if transcriber is not None else TranscriptionService()
+        )
         self._inspection_workers: dict[QThread, MediaInspectionWorker] = {}
+        self._transcription_thread: QThread | None = None
+        self._transcription_worker: TranscriptionWorker | None = None
         self.setWindowTitle("Video Profanity Censor")
         self.setMinimumSize(960, 640)
         self.setCentralWidget(self._create_central_widget())
@@ -84,6 +97,7 @@ class MainWindow(QMainWindow):
         section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
         self.scan_settings_widget = ScanSettingsWidget(self.state.scan_settings)
         self.scan_settings_widget.settings_changed.connect(self._on_scan_settings_changed)
+        self.scan_settings_widget.scan_button.clicked.connect(self._start_scan)
         section.layout().addWidget(self.scan_settings_widget)
         return section
 
@@ -102,10 +116,10 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.video_drop_area)
 
-        choose_button = QPushButton("Choose Video")
-        choose_button.setObjectName("chooseVideoButton")
-        choose_button.clicked.connect(self._choose_video)
-        layout.addWidget(choose_button)
+        self.choose_video_button = QPushButton("Choose Video")
+        self.choose_video_button.setObjectName("chooseVideoButton")
+        self.choose_video_button.clicked.connect(self._choose_video)
+        layout.addWidget(self.choose_video_button)
 
         self.video_filename_label = QLabel("Filename: No video selected")
         self.video_filename_label.setObjectName("videoFilename")
@@ -208,6 +222,60 @@ class MainWindow(QMainWindow):
         self.audio_codec_label.setText(f"Audio codec: {audio_codec}")
         self.video_status_label.setText("Input status: Ready to scan")
         self.statusBar().showMessage(f"Ready to scan {path.name}")
+
+    def _start_scan(self) -> None:
+        if self.state.selected_video is None:
+            QMessageBox.information(
+                self,
+                "Select a video",
+                "Choose or drop a video before starting a scan.",
+            )
+            return
+        if self._transcription_thread is not None:
+            return
+
+        self.state.word_timestamps.clear()
+        self._set_scan_controls_enabled(False)
+        self.statusBar().showMessage("Preparing transcription")
+
+        thread = QThread(self)
+        worker = TranscriptionWorker(
+            self.state.selected_video.path,
+            self.state.scan_settings,
+            self._transcriber,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.status_changed.connect(self.statusBar().showMessage)
+        worker.succeeded.connect(self._on_transcription_succeeded)
+        worker.failed.connect(self._on_transcription_failed)
+        worker.completed.connect(thread.quit)
+        worker.completed.connect(worker.deleteLater)
+        thread.finished.connect(self._release_transcription_thread)
+        self._transcription_thread = thread
+        self._transcription_worker = worker
+        thread.start()
+
+    def _on_transcription_succeeded(self, words: list[WordTimestamp]) -> None:
+        self.state.word_timestamps = list(words)
+        self.statusBar().showMessage(f"Transcription complete: {len(words)} words")
+
+    def _on_transcription_failed(self, message: str) -> None:
+        self.statusBar().showMessage("Transcription failed")
+        QMessageBox.warning(self, "Could not scan video", message)
+
+    def _release_transcription_thread(self) -> None:
+        thread = self._transcription_thread
+        self._transcription_thread = None
+        self._transcription_worker = None
+        self._set_scan_controls_enabled(True)
+        if thread is not None:
+            thread.deleteLater()
+
+    def _set_scan_controls_enabled(self, enabled: bool) -> None:
+        self.video_drop_area.setEnabled(enabled)
+        self.choose_video_button.setEnabled(enabled)
+        self.scan_settings_widget.setEnabled(enabled)
 
     def _on_media_inspection_failed(self, path: Path, message: str) -> None:
         if self.state.selected_video is None or self.state.selected_video.path != path:

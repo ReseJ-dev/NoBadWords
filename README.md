@@ -25,5 +25,6 @@ Detected profanity and export controls remain placeholders for later steps.
 
 Scan and censorship preferences are saved through the operating system's Qt
 settings store and restored the next time the application starts. The Scan
-Video button is currently present for workflow setup only; transcription is not
-implemented yet.
+Video button runs faster-whisper transcription in a background worker so the
+window remains responsive. Whisper models are downloaded by faster-whisper when
+first used; automated tests use mock models and do not download them.

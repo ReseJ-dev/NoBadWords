@@ -25,6 +25,16 @@ class ScanSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class WordTimestamp:
+    """One transcribed word and its media timestamps."""
+
+    word: str
+    start: float
+    end: float
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
 class VideoFile:
     """A video selected in the desktop application."""
 
@@ -46,6 +56,7 @@ class ApplicationState:
     selected_video: VideoFile | None = None
     media_info: "MediaInfo | None" = None
     scan_settings: ScanSettings = field(default_factory=ScanSettings)
+    word_timestamps: list[WordTimestamp] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

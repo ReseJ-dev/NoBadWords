@@ -72,7 +72,7 @@ class ScanSettingsWidget(QWidget):
 
         self.scan_button = QPushButton("Scan Video")
         self.scan_button.setObjectName("scanVideoButton")
-        self.scan_button.setToolTip("Scanning will be available after transcription is added.")
+        self.scan_button.setToolTip("Transcribe the selected video's speech.")
         layout.addWidget(self.scan_button)
 
         self._connect_changes()
