@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import SettingsStore
+from app.core.intervals import build_censor_intervals, total_censorship_duration
 from app.core.media_info import inspect_media
 from app.core.models import (
     ApplicationState,
@@ -106,6 +107,10 @@ class MainWindow(QMainWindow):
         self.detection_count_label.setObjectName("detectionCount")
         self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         section.layout().addWidget(self.detection_count_label)
+        self.effective_duration_label = QLabel("Effective censorship: 0.000 s")
+        self.effective_duration_label.setObjectName("effectiveCensorshipDuration")
+        self.effective_duration_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        section.layout().addWidget(self.effective_duration_label)
         self.review_widget = ProfanityReviewWidget()
         self.review_widget.matches_changed.connect(self._on_review_matches_changed)
         section.layout().addWidget(self.review_widget)
@@ -114,6 +119,7 @@ class MainWindow(QMainWindow):
     def _on_review_matches_changed(self, matches: list[ProfanityMatch]) -> None:
         self.state.profanity_matches = list(matches)
         self.detection_count_label.setText(f"Detected profanity: {len(matches)}")
+        self._refresh_censor_intervals()
 
     def _create_scan_settings_section(self) -> QFrame:
         section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
@@ -126,6 +132,7 @@ class MainWindow(QMainWindow):
     def _on_scan_settings_changed(self, settings: ScanSettings) -> None:
         self.state.scan_settings = settings
         self._settings_store.save(settings)
+        self._refresh_censor_intervals()
 
     def _create_video_input_section(self) -> QFrame:
         section = self._create_section("videoInput", "Video input", add_placeholder=False)
@@ -202,6 +209,10 @@ class MainWindow(QMainWindow):
         video = VideoFile.from_path(path)
         self.state.selected_video = video
         self.state.media_info = None
+        self.state.word_timestamps.clear()
+        self.state.profanity_matches.clear()
+        self.state.censor_intervals.clear()
+        self.review_widget.set_matches([])
         self.video_filename_label.setText(f"Filename: {video.path.name}")
         self.video_path_label.setText(f"Full path: {video.path}")
         self.video_size_label.setText(f"File size: {format_file_size(video.size_bytes)}")
@@ -235,6 +246,7 @@ class MainWindow(QMainWindow):
         if self.state.selected_video is None or self.state.selected_video.path != path:
             return
         self.state.media_info = media_info
+        self._refresh_censor_intervals()
         self.video_duration_label.setText(f"Duration: {self._format_duration(media_info.duration)}")
         self.video_resolution_label.setText(
             f"Resolution: {media_info.width} x {media_info.height}"
@@ -289,6 +301,25 @@ class MainWindow(QMainWindow):
         count = len(result.matches)
         self.detection_count_label.setText(f"Detected profanity: {count}")
         self.statusBar().showMessage(f"Scan complete: {count} detections")
+
+    def _refresh_censor_intervals(self) -> None:
+        if self.state.media_info is None:
+            self.state.censor_intervals = []
+            self.effective_duration_label.setText(
+                "Effective censorship: Media duration unavailable"
+            )
+            return
+        settings = self.state.scan_settings
+        self.state.censor_intervals = build_censor_intervals(
+            self.state.profanity_matches,
+            self.state.media_info.duration,
+            pre_padding_ms=settings.pre_padding_ms,
+            post_padding_ms=settings.post_padding_ms,
+        )
+        duration = total_censorship_duration(self.state.censor_intervals)
+        self.effective_duration_label.setText(
+            f"Effective censorship: {duration:.3f} s"
+        )
 
     def _on_transcription_failed(self, message: str) -> None:
         self.statusBar().showMessage("Transcription failed")

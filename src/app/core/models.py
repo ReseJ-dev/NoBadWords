@@ -56,6 +56,15 @@ class ScanResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CensorInterval:
+    """A safe media interval containing one or more matched detections."""
+
+    start: float
+    end: float
+    matches: tuple[ProfanityMatch, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class VideoFile:
     """A video selected in the desktop application."""
 
@@ -79,6 +88,7 @@ class ApplicationState:
     scan_settings: ScanSettings = field(default_factory=ScanSettings)
     word_timestamps: list[WordTimestamp] = field(default_factory=list)
     profanity_matches: list[ProfanityMatch] = field(default_factory=list)
+    censor_intervals: list[CensorInterval] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

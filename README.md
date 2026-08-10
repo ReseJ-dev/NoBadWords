@@ -24,7 +24,9 @@ not start a scan. Media details are inspected in the background with FFprobe.
 After transcription, Russian profanity is normalized and detected using
 configurable whole-token rules. Detections can be enabled, disabled, timestamp-
 edited, deleted, sorted, or added manually in the review table. Export controls
-remain a placeholder for later steps.
+remain a placeholder for later steps. Enabled detections are converted into
+bounded, padded, merged censorship intervals, and their effective total duration
+is shown in the interface.
 
 Scan and censorship preferences are saved through the operating system's Qt
 settings store and restored the next time the application starts. The Scan
