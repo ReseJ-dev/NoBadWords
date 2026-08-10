@@ -29,6 +29,15 @@ def test_model_exposes_required_columns_and_values() -> None:
     application.processEvents()
 
 
+def test_review_hides_detailed_timestamp_columns_by_default() -> None:
+    application = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    assert window.review_widget.table.isColumnHidden(ReviewColumn.START)
+    assert window.review_widget.table.isColumnHidden(ReviewColumn.END)
+    window.close()
+    application.processEvents()
+
+
 def test_enabled_state_and_timestamps_are_editable() -> None:
     model = ProfanityTableModel([match("word", 1.0, 2.0)])
 

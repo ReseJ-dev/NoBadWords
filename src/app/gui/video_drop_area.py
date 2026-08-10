@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.core.video import is_supported_video
 
@@ -14,18 +14,31 @@ class VideoDropArea(QWidget):
 
     video_dropped = Signal(Path)
     unsupported_file_dropped = Signal(Path)
+    choose_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("videoDropArea")
         self.setAcceptDrops(True)
+        self.setMinimumHeight(190)
         self.setProperty("dragActive", False)
 
         layout = QVBoxLayout(self)
-        prompt = QLabel("Drop a video file here")
+        icon = QLabel("＋")
+        icon.setObjectName("dropIcon")
+        layout.addWidget(icon)
+        prompt = QLabel("Drop video here")
         prompt.setObjectName("dropPrompt")
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
+        hint = QLabel("MP4, MOV, MKV, AVI, WEBM or M4V")
+        hint.setObjectName("dropHint")
+        layout.addWidget(hint)
+        self.choose_button = QPushButton("Choose Video")
+        self.choose_button.setObjectName("chooseVideoButton")
+        self.choose_button.setProperty("primary", True)
+        self.choose_button.clicked.connect(self.choose_requested)
+        layout.addWidget(self.choose_button, 0)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         path = self._first_local_path(event.mimeData().urls())

@@ -224,6 +224,8 @@ class ProfanityReviewWidget(QWidget):
         self.table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setColumnHidden(ReviewColumn.START, True)
+        self.table.setColumnHidden(ReviewColumn.END, True)
         self.table.doubleClicked.connect(self._activate_detection)
         layout.addWidget(self.table)
 

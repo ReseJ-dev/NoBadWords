@@ -38,7 +38,9 @@ def test_selecting_video_updates_application_state(
     assert window.state.selected_video.duration_seconds is None
     assert "sample video.mp4" in window.video_filename_label.text()
     assert "Inspecting media" in window.video_status_label.text()
+    assert not window.scan_settings_section.isHidden()
+    assert not window.video_metadata.isHidden()
+    assert window.review_stage.isHidden()
 
     window.close()
     application.processEvents()
-

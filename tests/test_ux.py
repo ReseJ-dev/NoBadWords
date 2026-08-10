@@ -1,28 +1,55 @@
 """Tests for polished workflow labels, menus, and processing states."""
 
-from PySide6.QtWidgets import QApplication, QLabel, QMenu
+from PySide6.QtWidgets import QApplication, QMenu
 
 from app.gui.main_window import MainWindow
+from app.core.models import ProfanityMatch, ScanResult, VideoFile, WordTimestamp
 
 
 def action_texts(menu: QMenu) -> list[str]:
     return [action.text().replace("&", "") for action in menu.actions() if not action.isSeparator()]
 
 
-def test_workflow_sections_are_numbered_and_clear() -> None:
+def test_workflow_reveals_only_the_current_stage() -> None:
     application = QApplication.instance() or QApplication([])
     window = MainWindow()
-    section_titles = [
-        label.text()
-        for label in window.findChildren(QLabel)
-        if label.property("sectionTitle")
-    ]
+    assert window.scan_settings_section.isHidden()
+    assert window.review_stage.isHidden()
+    assert window.export_section.isHidden()
+    assert window.video_metadata.isHidden()
+    assert window.video_drop_area.minimumHeight() >= 190
+    assert window.video_drop_area.choose_button.text() == "Choose Video"
+    window.close()
+    application.processEvents()
 
-    assert "1. Select Video" in section_titles
-    assert "2. Configure Scan / 3. Scan Video" in section_titles
-    assert "4. Review Detections" in section_titles
-    assert "5. Export Video" in section_titles
-    assert "scan a video" in window.detection_count_label.text()
+
+def test_advanced_scan_settings_start_collapsed() -> None:
+    application = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    assert window.scan_settings_widget.advanced_panel.isHidden()
+    window.scan_settings_widget.advanced_button.setChecked(True)
+    assert not window.scan_settings_widget.advanced_panel.isHidden()
+    window.close()
+    application.processEvents()
+
+
+def test_completed_scan_replaces_setup_with_review_workflow(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+    window.state.selected_video = VideoFile.from_path(path)
+    result = ScanResult(
+        [WordTimestamp("word", 1.0, 1.3, 0.9)],
+        [ProfanityMatch("word", "word", 1.0, 1.3, 0.9, "manual")],
+    )
+    window._on_transcription_succeeded(result)
+
+    assert window.video_input_section.isHidden()
+    assert window.scan_settings_section.isHidden()
+    assert not window.review_stage.isHidden()
+    assert not window.export_section.isHidden()
+    assert window.export_controls.mode_combo.currentText() == "Beep"
     window.close()
     application.processEvents()
 

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -72,8 +73,9 @@ class MainWindow(QMainWindow):
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
         self._close_when_idle = False
+        self._scan_completed = False
         self.setWindowTitle("Video Profanity Censor")
-        self.setMinimumSize(1100, 800)
+        self.setMinimumSize(980, 680)
         self.setCentralWidget(self._create_central_widget())
         self._create_menus()
         self.statusBar().showMessage("Ready")
@@ -83,15 +85,23 @@ class MainWindow(QMainWindow):
         central_widget.setObjectName("centralWidget")
 
         layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(18)
+        layout.setContentsMargins(32, 24, 32, 28)
+        layout.setSpacing(16)
 
-        heading = QLabel("Video Profanity Censor")
+        header = QHBoxLayout()
+        heading = QLabel("Video Censor")
         heading.setObjectName("pageHeading")
-        layout.addWidget(heading)
+        header.addWidget(heading)
+        header.addStretch(1)
+        self.settings_button = QPushButton("⚙")
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setToolTip("Open advanced scan settings")
+        self.settings_button.clicked.connect(self._show_advanced_settings)
+        header.addWidget(self.settings_button)
+        layout.addLayout(header)
 
         subtitle = QLabel(
-            "Import a video, scan its speech, review detections, and export a clean copy."
+            "Remove profanity from video automatically"
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -108,19 +118,26 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(False)
         layout.addWidget(self.cancel_button)
 
-        sections = QGridLayout()
-        sections.setSpacing(20)
-        sections.addWidget(self._create_video_input_section(), 0, 0)
-        sections.addWidget(self._create_scan_settings_section(), 0, 1)
-        sections.addWidget(self._create_results_section(), 1, 0)
-        sections.addWidget(self._create_export_section(), 1, 1)
-        sections.addWidget(self._create_preview_section(), 2, 0, 1, 2)
-        sections.setRowStretch(0, 1)
-        sections.setRowStretch(1, 1)
-        sections.setRowStretch(2, 2)
-        sections.setColumnStretch(0, 1)
-        sections.setColumnStretch(1, 1)
-        layout.addLayout(sections, 1)
+        self.video_input_section = self._create_video_input_section()
+        layout.addWidget(self.video_input_section)
+        self.scan_settings_section = self._create_scan_settings_section()
+        layout.addWidget(self.scan_settings_section)
+
+        self.review_stage = QWidget()
+        review_layout = QGridLayout(self.review_stage)
+        review_layout.setContentsMargins(0, 0, 0, 0)
+        review_layout.setSpacing(16)
+        self.preview_section = self._create_preview_section()
+        self.results_section = self._create_results_section()
+        review_layout.addWidget(self.preview_section, 0, 0)
+        review_layout.addWidget(self.results_section, 0, 1)
+        review_layout.setColumnStretch(0, 3)
+        review_layout.setColumnStretch(1, 2)
+        layout.addWidget(self.review_stage, 1)
+
+        self.export_section = self._create_export_section()
+        layout.addWidget(self.export_section)
+        self._update_workflow_visibility()
 
         return central_widget
 
@@ -172,6 +189,16 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage("Scan and censorship settings")
 
+    def _show_advanced_settings(self) -> None:
+        if self.state.selected_video is None:
+            self.statusBar().showMessage("Choose a video before configuring scan settings")
+            return
+        self.scan_settings_section.setVisible(True)
+        self.scan_settings_widget.advanced_button.setChecked(True)
+        self.scan_settings_widget.device_combo.setFocus(
+            Qt.FocusReason.ShortcutFocusReason
+        )
+
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
@@ -182,26 +209,35 @@ class MainWindow(QMainWindow):
 
     def _create_export_section(self) -> QFrame:
         section = self._create_section(
-            "exportControls", "5. Export Video", add_placeholder=False
+            "exportControls", "Export", add_placeholder=False
         )
         self.export_controls = ExportControlsWidget()
+        self.export_controls.mode_combo.setCurrentText(
+            self.state.scan_settings.censorship_mode
+        )
+        self.export_controls.mode_combo.currentTextChanged.connect(
+            self.scan_settings_widget.mode_combo.setCurrentText
+        )
+        self.scan_settings_widget.mode_combo.currentTextChanged.connect(
+            self.export_controls.mode_combo.setCurrentText
+        )
         self.export_controls.export_button.clicked.connect(self._choose_export_path)
         section.layout().addWidget(self.export_controls)
         return section
 
     def _create_results_section(self) -> QFrame:
         section = self._create_section(
-            "detectedProfanity", "4. Review Detections", add_placeholder=False
+            "detectedProfanity", "Detections", add_placeholder=False
         )
         self.detection_count_label = QLabel(
             "No detections yet — scan a video to begin"
         )
         self.detection_count_label.setObjectName("detectionCount")
-        self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         section.layout().addWidget(self.detection_count_label)
         self.effective_duration_label = QLabel("Effective censorship: 0.000 s")
         self.effective_duration_label.setObjectName("effectiveCensorshipDuration")
-        self.effective_duration_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.effective_duration_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         section.layout().addWidget(self.effective_duration_label)
         self.review_widget = ProfanityReviewWidget()
         self.review_widget.matches_changed.connect(self._on_review_matches_changed)
@@ -221,7 +257,7 @@ class MainWindow(QMainWindow):
 
     def _create_scan_settings_section(self) -> QFrame:
         section = self._create_section(
-            "scanSettings", "2. Configure Scan / 3. Scan Video", add_placeholder=False
+            "scanSettings", "Scan settings", add_placeholder=False
         )
         self.scan_settings_widget = ScanSettingsWidget(self.state.scan_settings)
         self.scan_settings_widget.settings_changed.connect(self._on_scan_settings_changed)
@@ -236,7 +272,7 @@ class MainWindow(QMainWindow):
 
     def _create_video_input_section(self) -> QFrame:
         section = self._create_section(
-            "videoInput", "1. Select Video", add_placeholder=False
+            "videoInput", "", add_placeholder=False
         )
         layout = section.layout()
 
@@ -245,16 +281,17 @@ class MainWindow(QMainWindow):
         self.video_drop_area.unsupported_file_dropped.connect(
             self._show_unsupported_file_message
         )
+        self.video_drop_area.choose_requested.connect(self._choose_video)
         layout.addWidget(self.video_drop_area)
 
-        self.choose_video_button = QPushButton("Choose Video")
-        self.choose_video_button.setObjectName("chooseVideoButton")
-        self.choose_video_button.setProperty("primary", True)
+        self.choose_video_button = self.video_drop_area.choose_button
         self.choose_video_button.setToolTip(
             "Choose an MP4, MOV, MKV, AVI, WEBM, or M4V file"
         )
-        self.choose_video_button.clicked.connect(self._choose_video)
-        layout.addWidget(self.choose_video_button)
+
+        self.video_metadata = QWidget()
+        metadata_layout = QGridLayout(self.video_metadata)
+        metadata_layout.setContentsMargins(0, 8, 0, 0)
 
         self.video_filename_label = QLabel("Filename: No video selected")
         self.video_filename_label.setObjectName("videoFilename")
@@ -283,7 +320,10 @@ class MainWindow(QMainWindow):
             self.audio_codec_label,
             self.video_status_label,
         ):
-            layout.addWidget(label)
+            position = metadata_layout.count()
+            metadata_layout.addWidget(label, position // 2, position % 2)
+        layout.addWidget(self.video_metadata)
+        self.video_metadata.setVisible(False)
         return section
 
     def _choose_video(self) -> None:
@@ -319,6 +359,7 @@ class MainWindow(QMainWindow):
         self.state.profanity_matches.clear()
         self.state.censor_intervals.clear()
         self.state.last_export_path = None
+        self._scan_completed = False
         self.export_controls.status_label.setText(
             "Export status: Waiting for enabled detections"
         )
@@ -333,6 +374,8 @@ class MainWindow(QMainWindow):
         self.video_codec_label.setText("Video codec: Inspecting...")
         self.audio_codec_label.setText("Audio codec: Inspecting...")
         self.video_status_label.setText("Input status: Inspecting media")
+        self.video_metadata.setVisible(True)
+        self._update_workflow_visibility()
         self.statusBar().showMessage(f"Inspecting {video.path.name}")
         self._start_media_inspection(video.path)
         return True
@@ -380,6 +423,7 @@ class MainWindow(QMainWindow):
         self.audio_codec_label.setText(f"Audio codec: {audio_codec}")
         self.video_status_label.setText("Input status: Ready to scan")
         self.statusBar().showMessage(f"Ready to scan {path.name}")
+        self._update_workflow_visibility()
 
     def _start_scan(self) -> None:
         if self.state.selected_video is None:
@@ -429,6 +473,16 @@ class MainWindow(QMainWindow):
         count = len(result.matches)
         self.detection_count_label.setText(f"Detected profanity: {count}")
         self.statusBar().showMessage(f"Scan complete: {count} detections")
+        self._scan_completed = True
+        self._update_workflow_visibility()
+
+    def _update_workflow_visibility(self) -> None:
+        has_video = self.state.selected_video is not None
+        has_results = self._scan_completed
+        self.video_input_section.setVisible(not has_results)
+        self.scan_settings_section.setVisible(has_video and not has_results)
+        self.review_stage.setVisible(has_results)
+        self.export_section.setVisible(has_results)
 
     def _refresh_censor_intervals(self) -> None:
         if self.state.media_info is None:
@@ -692,9 +746,10 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout(section)
         layout.setContentsMargins(18, 16, 18, 16)
-        title_label = QLabel(title)
-        title_label.setProperty("sectionTitle", True)
-        layout.addWidget(title_label)
+        if title:
+            title_label = QLabel(title)
+            title_label.setProperty("sectionTitle", True)
+            layout.addWidget(title_label)
 
         if add_placeholder:
             placeholder = QLabel("Coming in a later step")
