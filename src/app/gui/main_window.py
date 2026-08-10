@@ -23,6 +23,7 @@ from app.core.media_info import inspect_media
 from app.core.models import (
     ApplicationState,
     MediaInfo,
+    ProfanityMatch,
     ScanResult,
     ScanSettings,
     VideoFile,
@@ -30,6 +31,7 @@ from app.core.models import (
 from app.core.profanity_detector import ProfanityDetector, ProfanityScanner
 from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
+from app.gui.review_table import ProfanityReviewWidget
 from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
 from app.gui.workers import MediaInspectionWorker, TranscriptionWorker
@@ -104,7 +106,14 @@ class MainWindow(QMainWindow):
         self.detection_count_label.setObjectName("detectionCount")
         self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         section.layout().addWidget(self.detection_count_label)
+        self.review_widget = ProfanityReviewWidget()
+        self.review_widget.matches_changed.connect(self._on_review_matches_changed)
+        section.layout().addWidget(self.review_widget)
         return section
+
+    def _on_review_matches_changed(self, matches: list[ProfanityMatch]) -> None:
+        self.state.profanity_matches = list(matches)
+        self.detection_count_label.setText(f"Detected profanity: {len(matches)}")
 
     def _create_scan_settings_section(self) -> QFrame:
         section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
@@ -249,6 +258,7 @@ class MainWindow(QMainWindow):
 
         self.state.word_timestamps.clear()
         self.state.profanity_matches.clear()
+        self.review_widget.set_matches([])
         self.detection_count_label.setText("Scanning...")
         self._set_scan_controls_enabled(False)
         self.statusBar().showMessage("Preparing transcription")
@@ -275,6 +285,7 @@ class MainWindow(QMainWindow):
     def _on_transcription_succeeded(self, result: ScanResult) -> None:
         self.state.word_timestamps = list(result.words)
         self.state.profanity_matches = list(result.matches)
+        self.review_widget.set_matches(result.matches)
         count = len(result.matches)
         self.detection_count_label.setText(f"Detected profanity: {count}")
         self.statusBar().showMessage(f"Scan complete: {count} detections")
