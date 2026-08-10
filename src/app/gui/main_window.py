@@ -37,6 +37,7 @@ from app.core.transcription import Transcriber, TranscriptionService
 from app.core.video import SUPPORTED_VIDEO_EXTENSIONS, format_file_size, is_supported_video
 from app.gui.export_controls import ExportControlsWidget
 from app.gui.preview_widget import VideoPreviewWidget
+from app.gui.progress_widget import ProcessingProgressWidget
 from app.gui.review_table import ProfanityReviewWidget
 from app.gui.scan_settings import ScanSettingsWidget
 from app.gui.video_drop_area import VideoDropArea
@@ -95,6 +96,9 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
+
+        self.processing_progress = ProcessingProgressWidget()
+        layout.addWidget(self.processing_progress)
 
         self.cancel_button = QPushButton("Cancel Processing")
         self.cancel_button.setObjectName("cancelProcessingButton")
@@ -345,6 +349,7 @@ class MainWindow(QMainWindow):
         worker.completed.connect(worker.deleteLater)
         thread.finished.connect(lambda: self._release_inspection_thread(thread))
         self._inspection_workers[thread] = worker
+        self.processing_progress.start("Inspecting media")
         self._update_cancel_button()
         thread.start()
 
@@ -353,6 +358,8 @@ class MainWindow(QMainWindow):
         thread.deleteLater()
         self._update_cancel_button()
         self._finish_pending_close_if_idle()
+        if not self._has_active_work():
+            self.processing_progress.finish()
 
     def _on_media_inspection_cancelled(self, path: Path) -> None:
         if self.state.selected_video is not None and self.state.selected_video.path == path:
@@ -402,7 +409,7 @@ class MainWindow(QMainWindow):
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.status_changed.connect(self.statusBar().showMessage)
+        worker.status_changed.connect(self._on_processing_stage_changed)
         worker.succeeded.connect(self._on_transcription_succeeded)
         worker.failed.connect(self._on_transcription_failed)
         worker.cancelled.connect(self._on_transcription_cancelled)
@@ -411,6 +418,7 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._release_transcription_thread)
         self._transcription_thread = thread
         self._transcription_worker = worker
+        self.processing_progress.start("Loading Whisper model")
         self._update_cancel_button()
         thread.start()
 
@@ -509,6 +517,7 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.status_changed.connect(self._on_export_status_changed)
+        worker.progress_changed.connect(self.processing_progress.set_fraction)
         worker.succeeded.connect(self._on_export_succeeded)
         worker.failed.connect(self._on_export_failed)
         worker.cancelled.connect(self._on_export_cancelled)
@@ -517,10 +526,12 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._release_export_thread)
         self._export_thread = thread
         self._export_worker = worker
+        self.processing_progress.start("Preparing filters")
         self._update_cancel_button()
         thread.start()
 
     def _on_export_status_changed(self, status: str) -> None:
+        self.processing_progress.set_stage(status)
         self.export_controls.status_label.setText(f"Export status: {status}")
         self.statusBar().showMessage(status)
 
@@ -548,6 +559,7 @@ class MainWindow(QMainWindow):
         self._set_scan_controls_enabled(True)
         self._update_cancel_button()
         self._finish_pending_close_if_idle()
+        self.processing_progress.finish()
         if thread is not None:
             thread.deleteLater()
 
@@ -567,6 +579,7 @@ class MainWindow(QMainWindow):
         self._set_scan_controls_enabled(True)
         self._update_cancel_button()
         self._finish_pending_close_if_idle()
+        self.processing_progress.finish()
         if thread is not None:
             thread.deleteLater()
 
@@ -583,6 +596,10 @@ class MainWindow(QMainWindow):
                 self.export_action.setEnabled(False)
         if enabled:
             self._update_export_availability()
+
+    def _on_processing_stage_changed(self, status: str) -> None:
+        self.processing_progress.set_stage(status)
+        self.statusBar().showMessage(status)
 
     def _has_active_work(self) -> bool:
         return bool(

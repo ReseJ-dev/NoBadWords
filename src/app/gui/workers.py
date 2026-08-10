@@ -86,6 +86,7 @@ class TranscriptionWorker(QObject):
                 words, self._settings.confidence
             )
             self._cancellation_token.raise_if_cancelled()
+            self.status_changed.emit("Preparing review")
         except OperationCancelled:
             self.cancelled.emit()
         except Exception as error:
@@ -103,6 +104,7 @@ class ExportWorker(QObject):
     """Render a censored video without blocking the GUI thread."""
 
     status_changed = Signal(str)
+    progress_changed = Signal(float)
     succeeded = Signal(Path)
     failed = Signal(str)
     cancelled = Signal()
@@ -126,6 +128,7 @@ class ExportWorker(QObject):
                 self._request,
                 self.status_changed.emit,
                 self._cancellation_token,
+                self.progress_changed.emit,
             )
         except OperationCancelled:
             self.cancelled.emit()

@@ -38,14 +38,22 @@ def test_export_cancellation_terminates_process_and_removes_partial_output(
 
     class BlockingProcess:
         returncode = -15
+        stderr = ["terminated"]
 
         def __init__(self, *args: object, **kwargs: object) -> None:
             output.write_bytes(b"partial")
             started.set()
 
-        def communicate(self) -> tuple[str, str]:
-            assert stopped.wait(timeout=2)
-            return "", "terminated"
+        @property
+        def stdout(self):
+            def lines():
+                assert stopped.wait(timeout=2)
+                if False:
+                    yield ""
+            return lines()
+
+        def wait(self) -> int:
+            return self.returncode
 
         def poll(self) -> int | None:
             return self.returncode if stopped.is_set() else None

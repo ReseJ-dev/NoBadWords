@@ -101,12 +101,14 @@ def test_export_engine_runs_argument_list_and_reports_stages(
 
     class FakeProcess:
         returncode = 0
+        stdout = ["out_time_us=5000000\n", "progress=end\n"]
+        stderr: list[str] = []
 
         def __init__(self, command: list[str], **kwargs: object) -> None:
             captured.append(command)
 
-        def communicate(self) -> tuple[str, str]:
-            return "", ""
+        def wait(self) -> int:
+            return self.returncode
 
         def poll(self) -> int:
             return self.returncode
@@ -135,12 +137,14 @@ def test_export_rejects_source_overwrite_and_surfaces_ffmpeg_error(
 
     class FailedProcess:
         returncode = 1
+        stdout: list[str] = []
+        stderr = ["bad codec"]
 
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def communicate(self) -> tuple[str, str]:
-            return "", "bad codec"
+        def wait(self) -> int:
+            return self.returncode
 
         def poll(self) -> int:
             return self.returncode
@@ -173,7 +177,7 @@ def test_window_runs_export_outside_gui_thread(tmp_path: Path) -> None:
     class BlockingExporter:
         def export(
             self, export_request: ExportRequest, status_callback=None,
-            cancellation_token=None,
+            cancellation_token=None, progress_callback=None,
         ) -> Path:
             if status_callback:
                 status_callback("Rendering video")

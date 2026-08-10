@@ -16,6 +16,7 @@ from app.core.models import (
 )
 
 ExportStatusCallback = Callable[[str], None]
+ExportProgressCallback = Callable[[float], None]
 
 
 class CensorExportError(RuntimeError):
@@ -30,6 +31,7 @@ class VideoExporter(Protocol):
         request: ExportRequest,
         status_callback: ExportStatusCallback | None = None,
         cancellation_token: CancellationToken | None = None,
+        progress_callback: ExportProgressCallback | None = None,
     ) -> Path: ...
 
 
@@ -146,6 +148,7 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
     """Build a safe FFmpeg argument list for a censorship export."""
     _validate_request(request)
     base = [str(ffmpeg), "-hide_banner", "-n", "-i", str(request.input_path)]
+    progress = ["-progress", "pipe:1", "-nostats"]
     if not request.intervals:
         return base + [
             "-map",
@@ -154,8 +157,7 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
             "0:a:0",
             "-c",
             "copy",
-            str(request.output_path),
-        ]
+        ] + progress + [str(request.output_path)]
     if request.mode == "Cut":
         return base + [
             "-filter_complex",
@@ -174,8 +176,7 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
             "aac",
             "-movflags",
             "+faststart",
-            str(request.output_path),
-        ]
+        ] + progress + [str(request.output_path)]
     audio_filter = build_audio_filter(
         request.mode,
         request.intervals,
@@ -195,8 +196,7 @@ def build_export_command(ffmpeg: Path | str, request: ExportRequest) -> list[str
         "aac",
         "-movflags",
         "+faststart",
-        str(request.output_path),
-    ]
+    ] + progress + [str(request.output_path)]
 
 
 class CensorEngine:
@@ -210,6 +210,7 @@ class CensorEngine:
         request: ExportRequest,
         status_callback: ExportStatusCallback | None = None,
         cancellation_token: CancellationToken | None = None,
+        progress_callback: ExportProgressCallback | None = None,
     ) -> Path:
         notify = status_callback or (lambda status: None)
         token = cancellation_token or CancellationToken()
@@ -232,7 +233,21 @@ class CensorEngine:
             )
             terminate_callback = lambda: _terminate_process(process)
             token.add_callback(terminate_callback)
-            _, stderr = process.communicate()
+            stderr_lines: list[str] = []
+            stderr_thread = threading.Thread(
+                target=_collect_stream, args=(process.stderr, stderr_lines), daemon=True
+            )
+            stderr_thread.start()
+            duration = _output_duration(request)
+            if process.stdout is not None:
+                for line in process.stdout:
+                    token.raise_if_cancelled()
+                    progress = parse_ffmpeg_progress(line, duration)
+                    if progress is not None and progress_callback is not None:
+                        progress_callback(progress)
+            process.wait()
+            stderr_thread.join(timeout=1)
+            stderr = "".join(stderr_lines)
             token.raise_if_cancelled()
         except OSError as error:
             _cleanup_incomplete_output(request)
@@ -278,6 +293,37 @@ def _validate_request(request: ExportRequest) -> None:
 
 def _number(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def parse_ffmpeg_progress(line: str, duration: float) -> float | None:
+    """Return a normalized value for an FFmpeg progress output line."""
+    key, separator, value = line.strip().partition("=")
+    if not separator or duration <= 0:
+        return None
+    if key == "progress" and value == "end":
+        return 1.0
+    if key not in {"out_time_us", "out_time_ms"}:
+        return None
+    try:
+        # FFmpeg currently reports both fields in microseconds despite the legacy name.
+        elapsed = float(value) / 1_000_000
+    except ValueError:
+        return None
+    return max(0.0, min(1.0, elapsed / duration))
+
+
+def _output_duration(request: ExportRequest) -> float:
+    if request.mode != "Cut":
+        return request.media_duration
+    return sum(
+        segment.source_end - segment.source_start
+        for segment in build_keep_segments(request.intervals, request.media_duration)
+    )
+
+
+def _collect_stream(stream: object, lines: list[str]) -> None:
+    if stream is not None:
+        lines.extend(stream)  # type: ignore[arg-type]
 
 
 def _terminate_process(process: subprocess.Popen[str]) -> None:
