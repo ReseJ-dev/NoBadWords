@@ -48,6 +48,10 @@ class VideoPreviewWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.source_label = QLabel("Select a video to enable preview")
+        self.source_label.setObjectName("previewSourceStatus")
+        self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.source_label)
         layout.addWidget(self.video_output, 1)
 
         timeline = QHBoxLayout()
@@ -85,12 +89,19 @@ class VideoPreviewWidget(QWidget):
         self.previous_detection_button.clicked.connect(self.previous_detection)
         self.next_detection_button.clicked.connect(self.next_detection)
         self.play_detection_button.clicked.connect(self.play_detection)
+        self.play_button.setToolTip("Play the selected video")
+        self.pause_button.setToolTip("Pause playback")
+        self.previous_detection_button.setToolTip("Seek to the previous detection")
+        self.next_detection_button.setToolTip("Seek to the next detection")
+        self.play_detection_button.setToolTip("Play from one second before the detection")
+        self.play_button.setShortcut("Space")
         self._update_navigation_buttons()
 
     def set_source(self, path: Path) -> None:
         """Load a local video without automatically starting playback."""
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(str(path.resolve())))
+        self.source_label.setText(f"Previewing: {path.name}")
         self.timeline_slider.setValue(0)
         self.current_time_label.setText("00:00")
 

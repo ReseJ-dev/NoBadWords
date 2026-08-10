@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt
+from PySide6.QtGui import QAction, QKeySequence
 
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Video Profanity Censor")
         self.setMinimumSize(1100, 800)
         self.setCentralWidget(self._create_central_widget())
+        self._create_menus()
         self.statusBar().showMessage("Ready")
 
     def _create_central_widget(self) -> QWidget:
@@ -94,7 +96,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(subtitle)
 
         sections = QGridLayout()
-        sections.setSpacing(16)
+        sections.setSpacing(20)
         sections.addWidget(self._create_video_input_section(), 0, 0)
         sections.addWidget(self._create_scan_settings_section(), 0, 1)
         sections.addWidget(self._create_results_section(), 1, 0)
@@ -117,9 +119,57 @@ class MainWindow(QMainWindow):
         section.layout().addWidget(self.preview_widget)
         return section
 
+    def _create_menus(self) -> None:
+        self.file_menu = self.menuBar().addMenu("&File")
+        self.open_action = QAction("&Open Video...", self)
+        self.open_action.setShortcut(QKeySequence.StandardKey.Open)
+        self.open_action.setStatusTip("Choose a video to scan")
+        self.open_action.triggered.connect(self._choose_video)
+        self.file_menu.addAction(self.open_action)
+
+        self.export_action = QAction("&Export Video...", self)
+        self.export_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.export_action.setStatusTip("Export the reviewed censorship intervals")
+        self.export_action.setEnabled(False)
+        self.export_action.triggered.connect(self._choose_export_path)
+        self.file_menu.addAction(self.export_action)
+        self.file_menu.addSeparator()
+
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.triggered.connect(self.close)
+        self.file_menu.addAction(exit_action)
+
+        self.tools_menu = self.menuBar().addMenu("&Tools")
+        settings_action = QAction("&Settings", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.setStatusTip("Focus the scan and censorship settings")
+        settings_action.triggered.connect(self._focus_settings)
+        self.tools_menu.addAction(settings_action)
+
+        self.help_menu = self.menuBar().addMenu("&Help")
+        about_action = QAction("&About", self)
+        about_action.setShortcut(QKeySequence.StandardKey.HelpContents)
+        about_action.triggered.connect(self._show_about)
+        self.help_menu.addAction(about_action)
+
+    def _focus_settings(self) -> None:
+        self.scan_settings_widget.language_combo.setFocus(
+            Qt.FocusReason.ShortcutFocusReason
+        )
+        self.statusBar().showMessage("Scan and censorship settings")
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About Video Profanity Censor",
+            "Video Profanity Censor\n\n"
+            "Scan speech, review detected profanity, and export a cleaned video.",
+        )
+
     def _create_export_section(self) -> QFrame:
         section = self._create_section(
-            "exportControls", "Export controls", add_placeholder=False
+            "exportControls", "5. Export Video", add_placeholder=False
         )
         self.export_controls = ExportControlsWidget()
         self.export_controls.export_button.clicked.connect(self._choose_export_path)
@@ -128,9 +178,11 @@ class MainWindow(QMainWindow):
 
     def _create_results_section(self) -> QFrame:
         section = self._create_section(
-            "detectedProfanity", "Detected profanity", add_placeholder=False
+            "detectedProfanity", "4. Review Detections", add_placeholder=False
         )
-        self.detection_count_label = QLabel("No scan results")
+        self.detection_count_label = QLabel(
+            "No detections yet — scan a video to begin"
+        )
         self.detection_count_label.setObjectName("detectionCount")
         self.detection_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         section.layout().addWidget(self.detection_count_label)
@@ -155,7 +207,9 @@ class MainWindow(QMainWindow):
         self.preview_widget.seek_to_detection(detection)
 
     def _create_scan_settings_section(self) -> QFrame:
-        section = self._create_section("scanSettings", "Scan settings", add_placeholder=False)
+        section = self._create_section(
+            "scanSettings", "2. Configure Scan / 3. Scan Video", add_placeholder=False
+        )
         self.scan_settings_widget = ScanSettingsWidget(self.state.scan_settings)
         self.scan_settings_widget.settings_changed.connect(self._on_scan_settings_changed)
         self.scan_settings_widget.scan_button.clicked.connect(self._start_scan)
@@ -168,7 +222,9 @@ class MainWindow(QMainWindow):
         self._refresh_censor_intervals()
 
     def _create_video_input_section(self) -> QFrame:
-        section = self._create_section("videoInput", "Video input", add_placeholder=False)
+        section = self._create_section(
+            "videoInput", "1. Select Video", add_placeholder=False
+        )
         layout = section.layout()
 
         self.video_drop_area = VideoDropArea()
@@ -180,6 +236,10 @@ class MainWindow(QMainWindow):
 
         self.choose_video_button = QPushButton("Choose Video")
         self.choose_video_button.setObjectName("chooseVideoButton")
+        self.choose_video_button.setProperty("primary", True)
+        self.choose_video_button.setToolTip(
+            "Choose an MP4, MOV, MKV, AVI, WEBM, or M4V file"
+        )
         self.choose_video_button.clicked.connect(self._choose_video)
         layout.addWidget(self.choose_video_button)
 
@@ -312,6 +372,7 @@ class MainWindow(QMainWindow):
         self.review_widget.set_matches([])
         self.detection_count_label.setText("Scanning...")
         self._set_scan_controls_enabled(False)
+        self.scan_settings_widget.scan_button.setText("Scanning...")
         self.statusBar().showMessage("Preparing transcription")
 
         thread = QThread(self)
@@ -376,6 +437,8 @@ class MainWindow(QMainWindow):
             and self._export_thread is None
         )
         self.export_controls.export_button.setEnabled(ready)
+        if hasattr(self, "export_action"):
+            self.export_action.setEnabled(ready)
         if (
             self.state.media_info is not None
             and self.state.media_info.audio_stream_count == 0
@@ -419,6 +482,7 @@ class MainWindow(QMainWindow):
         if self._export_thread is not None:
             return
         self._set_scan_controls_enabled(False)
+        self.export_controls.export_button.setText("Exporting...")
         self.export_controls.status_label.setText("Export status: Preparing")
         thread = QThread(self)
         worker = ExportWorker(request, self._exporter)
@@ -453,6 +517,7 @@ class MainWindow(QMainWindow):
         thread = self._export_thread
         self._export_thread = None
         self._export_worker = None
+        self.export_controls.export_button.setText("Export Video")
         self._set_scan_controls_enabled(True)
         if thread is not None:
             thread.deleteLater()
@@ -465,6 +530,7 @@ class MainWindow(QMainWindow):
         thread = self._transcription_thread
         self._transcription_thread = None
         self._transcription_worker = None
+        self.scan_settings_widget.scan_button.setText("Scan Video")
         self._set_scan_controls_enabled(True)
         if thread is not None:
             thread.deleteLater()
@@ -476,6 +542,10 @@ class MainWindow(QMainWindow):
         self.review_widget.setEnabled(enabled)
         self.preview_widget.setEnabled(enabled)
         self.export_controls.setEnabled(enabled)
+        if hasattr(self, "open_action"):
+            self.open_action.setEnabled(enabled)
+            if not enabled:
+                self.export_action.setEnabled(False)
         if enabled:
             self._update_export_availability()
 

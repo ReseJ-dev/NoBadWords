@@ -13,6 +13,7 @@ class ExportControlsWidget(QWidget):
 
         self.export_button = QPushButton("Export Video")
         self.export_button.setObjectName("exportVideoButton")
+        self.export_button.setProperty("primary", True)
         self.export_button.setToolTip("Save a cleaned copy of the selected video.")
         self.export_button.setEnabled(False)
         layout.addWidget(self.export_button)
@@ -26,4 +27,3 @@ class ExportControlsWidget(QWidget):
         self.output_label.setObjectName("exportOutput")
         self.output_label.setWordWrap(True)
         layout.addWidget(self.output_label)
-

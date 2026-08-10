@@ -35,6 +35,9 @@ and reports the current export stage and output path in the interface.
 The built-in preview supports playback, pausing, timeline seeking, and direct
 navigation to reviewed detections with one second of context.
 
+The numbered desktop workflow includes File, Tools, and Help menus with keyboard
+shortcuts for opening videos, exporting, settings, help, and exit.
+
 Scan and censorship preferences are saved through the operating system's Qt
 settings store and restored the next time the application starts. The Scan
 Video button runs faster-whisper transcription in a background worker so the

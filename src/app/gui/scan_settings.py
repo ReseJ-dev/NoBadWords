@@ -72,11 +72,22 @@ class ScanSettingsWidget(QWidget):
 
         self.scan_button = QPushButton("Scan Video")
         self.scan_button.setObjectName("scanVideoButton")
+        self.scan_button.setProperty("primary", True)
         self.scan_button.setToolTip("Transcribe the selected video's speech.")
         layout.addWidget(self.scan_button)
 
         self._connect_changes()
         self._update_beep_frequency_state(settings.censorship_mode)
+        self.language_combo.setToolTip("Speech language expected in the video")
+        self.model_combo.setToolTip("Larger models are more accurate but slower")
+        self.device_combo.setToolTip("Auto uses CUDA when available, otherwise CPU")
+        self.mode_combo.setToolTip("Choose how reviewed profanity will be removed")
+        self.confidence_spin.setToolTip(
+            "Ignore words below this recognition confidence"
+        )
+        self.pre_padding_spin.setToolTip("Censor this much audio before each word")
+        self.post_padding_spin.setToolTip("Censor this much audio after each word")
+        self.beep_frequency_spin.setToolTip("Frequency of the censor tone")
 
     def current_settings(self) -> ScanSettings:
         """Build an immutable settings snapshot from the controls."""

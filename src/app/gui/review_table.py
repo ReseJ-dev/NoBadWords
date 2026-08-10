@@ -5,6 +5,7 @@ from enum import IntEnum
 from typing import Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
@@ -220,6 +221,7 @@ class ProfanityReviewWidget(QWidget):
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
+        self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.doubleClicked.connect(self._activate_detection)
         layout.addWidget(self.table)
@@ -229,6 +231,12 @@ class ProfanityReviewWidget(QWidget):
         self.deselect_all_button = QPushButton("Deselect All")
         self.delete_button = QPushButton("Delete Selected")
         self.add_button = QPushButton("Add Manual Detection")
+        self.select_all_button.setToolTip("Enable every detection for censorship")
+        self.deselect_all_button.setToolTip("Disable every detection")
+        self.delete_button.setToolTip("Delete the selected table rows")
+        self.add_button.setToolTip("Add a custom timestamp interval")
+        self.delete_button.setShortcut(QKeySequence.StandardKey.Delete)
+        self.add_button.setShortcut(QKeySequence("Insert"))
         for button in (
             self.select_all_button,
             self.deselect_all_button,
