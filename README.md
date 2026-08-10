@@ -43,3 +43,18 @@ settings store and restored the next time the application starts. The Scan
 Video button runs faster-whisper transcription in a background worker so the
 window remains responsive. Whisper models are downloaded by faster-whisper when
 first used; automated tests use mock models and do not download them.
+
+## Build the Windows executable
+
+On Windows with Python 3.12 installed:
+
+```powershell
+python -m pip install -e ".[build]"
+python scripts/build_windows.py
+```
+
+The GUI build is written to `dist/VideoProfanityCensor/VideoProfanityCensor.exe`
+and does not open a console window. To bundle media tools, place official
+`ffmpeg.exe` and `ffprobe.exe` binaries in `vendor/ffmpeg/bin` before building.
+If they are omitted, the application discovers both tools from the user's
+`PATH` and displays installation guidance when either is unavailable.

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 
+from app.core.resources import resource_path
+
 
 class FFmpegNotFoundError(RuntimeError):
     """Raised when FFmpeg or FFprobe cannot be located."""
@@ -19,6 +21,10 @@ class FFmpegTools:
 
 def find_executable(name: str) -> Path | None:
     """Return the executable found on PATH, if any."""
+    executable_name = f"{name}.exe" if not name.lower().endswith(".exe") else name
+    bundled = resource_path(Path("ffmpeg") / "bin" / executable_name)
+    if bundled.is_file():
+        return bundled.resolve()
     resolved = shutil.which(name)
     return Path(resolved).resolve() if resolved else None
 
@@ -36,7 +42,6 @@ def discover_ffmpeg_tools() -> FFmpegTools:
         missing_names = " and ".join(missing)
         raise FFmpegNotFoundError(
             f"{missing_names} could not be found. Install FFmpeg and ensure its bin "
-            "folder is available on PATH."
+            "folder is available on PATH, or reinstall a build that bundles FFmpeg."
         )
     return FFmpegTools(ffmpeg=ffmpeg, ffprobe=ffprobe)
-

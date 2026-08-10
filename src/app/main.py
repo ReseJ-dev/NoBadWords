@@ -4,9 +4,11 @@ import logging
 import sys
 from collections.abc import Sequence
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import configure_logging
+from app.core.resources import resource_path
 from app.gui.main_window import MainWindow
 from app.gui.styles import APPLICATION_STYLESHEET
 
@@ -18,6 +20,7 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
     application = QApplication(list(argv) if argv is not None else sys.argv)
     application.setOrganizationName("VideoProfanityCensor")
     application.setApplicationName("Video Profanity Censor")
+    application.setWindowIcon(QIcon(str(resource_path("resources/app_icon.svg"))))
     application.setStyleSheet(APPLICATION_STYLESHEET)
     return application
 
